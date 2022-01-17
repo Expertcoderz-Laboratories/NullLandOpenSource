@@ -1,6 +1,3 @@
---// Author: @Expertcoderz
---// Last updated: 2022-01-17
-
 server, service = nil, nil
 
 return function()
@@ -8,9 +5,12 @@ return function()
 
 	Variables.WorldInstances = {}
 
-	server.Functions.RegisterCollectionServiceInstance = function(package: {
+	server.Functions.RegisterCollectionServiceInstance = function(package: Instance|{
 		TagName: string?, SingleSetup: boolean?, Setup: (Instance, {}, {})->()?, Cleanup: (Instance, {}, {})->()?, Extra: ({}, {})->()?
 		})
+		if typeof(package) == "Instance" then
+			package = require(package)
+		end
 		if not package.TagName then return end
 		Variables.WorldInstances[package.TagName] = {}
 		if package.Setup then
@@ -48,7 +48,7 @@ return function()
 
 	for _, module in ipairs(script:GetChildren()) do
 		if not module:IsA("ModuleScript") then continue end
-		xpcall(server.Functions.RegisterCollectionServiceInstance, function(err) warn("Error loading package module", module.Name, ":", err) end, require(module))
+		server.Functions.RegisterCollectionServiceInstance(module)
 	end
 
 	server.Functions.GetCollectionServicePackageFromInstance = function(inst: Instance, tag: string)
