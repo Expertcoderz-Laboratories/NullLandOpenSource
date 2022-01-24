@@ -52,19 +52,19 @@ function Package:setEnabled(enabled: boolean, color: BrickColor?)
 		self.Sound:Play()
 		while self.service.RunService.Stepped:Wait() do
 			if not self.enabled or not self.Root then break end
-			local C = self.Spinner:GetModelCFrame()
+			local spinnerCF = self.Spinner:GetModelCFrame()
 			local parts = {}
 			local function scan(parent)
-				for _, OBJ in pairs(parent:GetChildren()) do
-					if OBJ:IsA("BasePart") then
-						table.insert(parts, OBJ)
+				for _, v in pairs(parent:GetChildren()) do
+					if v:IsA("BasePart") then
+						table.insert(parts, v)
 					end	
-					scan(OBJ)
+					scan(v)
 				end
 			end
 			scan(self.Spinner)
 			for _, part in pairs(parts) do
-				part.CFrame = (C * CFrame.Angles(math.rad(5), math.rad(0), 0) * (C:inverse() * part.CFrame))
+				part.CFrame = (spinnerCF * CFrame.Angles(math.rad(5), math.rad(0), 0) * (spinnerCF:inverse() * part.CFrame))
 			end
 		end
 	else
