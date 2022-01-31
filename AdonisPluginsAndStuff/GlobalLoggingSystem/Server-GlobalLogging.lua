@@ -205,7 +205,7 @@ return function()
 						Size = UDim2.new(1, -10, 0, 30);
 						BackgroundTransparency = 1;
 						TextXAlignment = "Left";
-						Text = "  ["..(server.Remote.Get(plr, "Function", "GetClientFormattedTime", decoded._StartTime, true) or "Unknown").."] "..id;
+						Text = "  ["..(server.Remote.Get(plr, "LocallyFormattedTime", decoded._StartTime, true) or "Unknown").."] "..id;
 						ToolTip = string.format("#: %s | Type: %s | First Join: %s", FormatNumber(#json), tostring(decoded._ServerType), tostring(decoded._FirstJoin));
 						ZIndex = 2;
 						Children = {
