@@ -25,7 +25,7 @@ return function(data)
 	function fetch()
 		local res = client.Remote.Get("ExportedLog", serverId)
 		if res == nil then
-			client.UI.Make("Output", {Message = "Log does not exist/invalid server ID.";})
+			task.defer(client.UI.Make, "Output", {Message = "Log does not exist/invalid server ID.";})
 			window:Close()
 			return
 		elseif not res then
