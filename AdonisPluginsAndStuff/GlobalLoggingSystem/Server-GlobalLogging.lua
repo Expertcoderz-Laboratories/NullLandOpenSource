@@ -121,7 +121,7 @@ return function()
 		end
 
 		task.defer(function()
-			if EXPORT_LOG_INTERVAL >= math.huge then return end
+			if not EXPORT_LOG_INTERVAL or EXPORT_LOG_INTERVAL >= math.huge then return end
 			while task.wait(EXPORT_LOG_INTERVAL) do
 				server.Functions.ExportGlobalLog()
 			end
