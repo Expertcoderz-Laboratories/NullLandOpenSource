@@ -28,6 +28,8 @@ local GLOBAL_LOGS_PERMS = {
 	Delete = 900,
 
 	Export = 900,
+
+	ReceiveOverloadWarning = 900,
 }
 
 local LOGS_TO_INCLUDE = {
@@ -74,6 +76,10 @@ return function()
 			if EXPORT_LOG_IN_STUDIO or manual or not service.RunService:IsStudio() then
 				return xpcall(function()
 					GlobalLogStore:UpdateAsync(DATASTORE_KEY, function(currentLogs)
+						if not currentLogs then
+							warn("Initial global logging datastore setup")
+							currentLogs = {}
+						end
 						local currentSize = #service.HttpService:JSONEncode(currentLogs)
 						if currentSize > CRITICAL_LOG_SIZE then
 							warn("GLOBAL EXPORTED LOG STORE CRITICALLY APPROACHING", DATASTORE_SIZE_LIMIT, "CHARACTER LIMIT:", currentSize)
@@ -129,10 +135,11 @@ return function()
 			if not _firstJoin then _firstJoin = "@"..plr.Name end
 			task.defer(function()
 				task.wait(3)
-				if server.Admin.GetLevel(plr) >= 900
+				if
+					server.Admin.CheckComLevel(server.Admin.GetLevel(plr), GLOBAL_LOGS_PERMS.ReceiveOverloadWarning)
 					and select(2, xpcall(function()
 						local chars = 0
-						for id: string, json: string in pairs(GlobalLogStore:GetAsync(DATASTORE_KEY)) do
+						for id: string, json: string in pairs(GlobalLogStore:GetAsync(DATASTORE_KEY) or {}) do
 							chars += #json
 						end
 						return chars >= LOG_SIZE_BEFORE_WARN
@@ -142,7 +149,7 @@ return function()
 						Title = "Warning!";
 						Icon = server.MatIcons.Warning;
 						Text = "Global exported log store reaching datastore value limit!";
-						Time = 30;
+						Time = 25;
 					})
 				end
 			end)
@@ -172,7 +179,7 @@ return function()
 				server.Functions.Hint("Loading exported logs...", {plr})
 
 				local globalLogs = select(2, xpcall(function()
-					return GlobalLogStore:GetAsync(DATASTORE_KEY)
+					return GlobalLogStore:GetAsync(DATASTORE_KEY) or {}
 				end, function(err)
 					warn("Error listing global exported logs:", err)
 					return nil
@@ -265,7 +272,7 @@ return function()
 		server.Remote.Returnables.ExportedLog = function(plr: Player, args)
 			if server.Admin.CheckComLevel(server.Admin.GetLevel(plr), GLOBAL_LOGS_PERMS.Open) then
 				return select(2, xpcall(function()
-					local data = GlobalLogStore:GetAsync(DATASTORE_KEY)[args[1]]
+					local data = (GlobalLogStore:GetAsync(DATASTORE_KEY) or {})[args[1]]
 					return if data then service.HttpService:JSONDecode(data) else nil
 				end, function()
 					return false
@@ -285,7 +292,7 @@ return function()
 				local success, res = pcall(function()
 					local existed = false
 					GlobalLogStore:UpdateAsync(DATASTORE_KEY, function(currentLogs)
-						if currentLogs[args[1]] then
+						if currentLogs and currentLogs[args[1]] then
 							existed = true
 							currentLogs[args[1]] = nil
 						end
@@ -294,11 +301,7 @@ return function()
 					return existed
 				end)
 				if success then
-					if res then
-						server.Functions.Hint("Successfully deleted global log: "..args[1], {plr})
-					else
-						server.Functions.Hint("Global log not found: "..args[1], {plr})
-					end
+					server.Functions.Hint((if res then "Successfully deleted global log: " else "Global log not found: ")..args[1], {plr})
 				else
 					error("An error occurred whilst attempting to call RemoveAsync.")
 				end
@@ -315,10 +318,10 @@ return function()
 				if server.Remote.GetGui(plr, "YesNoPrompt", {Question = "Would you like to delete all exported global logs?"}) == "Yes" then
 					if
 						pcall(function()
-							GlobalLogStore:SetAsync(DATASTORE_KEY, {})
+							GlobalLogStore:RemoveAsync(DATASTORE_KEY)
 						end)
 					then
-						server.Functions.Hint("Cleared global exported logs.", {plr})
+						server.Functions.Hint("Successfully cleared all global exported logs.", {plr})
 					else
 						error("Error occurred clearing global exported logs.")
 					end
@@ -334,9 +337,9 @@ return function()
 			AdminLevel = GLOBAL_LOGS_PERMS.Export;
 			Function = function(plr: Player, args: {string})
 				if server.Functions.ExportGlobalLog(true) then
-					server.Functions.Hint("Exported the global logs for this server.", {plr})
+					server.Functions.Hint("Exported the global log for this server.", {plr})
 				else
-					error("Error exporting global logs.")
+					error("Error exporting global log for this server.")
 				end
 			end
 		}
