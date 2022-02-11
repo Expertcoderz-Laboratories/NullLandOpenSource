@@ -3,6 +3,8 @@
 	Description: The serverside component of the Adonis Gun System.
 	Author: Expertcoderz
 	Release Date: 2022-02-11 (project started in December 2021; originated from Aug/Sep 2021)
+
+	THIS REQUIRES THE CollectionServiceHandler PLUGIN TO FUNCTION.
 --]]
 
 server, service = nil, nil
