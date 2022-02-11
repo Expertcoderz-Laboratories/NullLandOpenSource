@@ -519,7 +519,6 @@ return function()
 						end)
 					end
 				end
-				--if onRayHitConnection then onRayHitConnection:Disconnect() end
 			end)
 
 			connectEvent(Remotes.VisualizeBulletSet.OnClientEvent, function(plr, ...)
