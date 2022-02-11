@@ -1,7 +1,8 @@
+--!nocheck
 --[[
 	Description: The clientside component of the Adonis Gun System; handles most of the visuals & controls.
 	Author: Expertcoderz
-	Release Date: 2022-02-11 (project started in December 2021)
+	Release Date: 2022-02-11 (project started in December 2021; originated from Aug/Sep 2021)
 --]]
 
 client, service = nil, nil
