@@ -179,7 +179,7 @@ return function()
 					end
 				end
 				if #self.flashlightObjs > 0 then
-					tool:SetAttribute("FlashlightEnabled", true) --// for informing the client that pressing [E] can toggle the flashlight
+					tool:SetAttribute("FlashlightEnabled", true) --// for informing the client that flashlight functionality exists
 				end
 
 				--// Dictionary of color-customizable component parts of the gun, with their respective original/default colors
