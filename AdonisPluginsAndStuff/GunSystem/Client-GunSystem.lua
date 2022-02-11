@@ -1,0 +1,1113 @@
+--[[
+	Description: The clientside component of the Adonis Gun System; handles most of the visuals & controls.
+	Author: Expertcoderz
+	Release Date: 2022-02-11 (project started in December 2021)
+--]]
+
+client, service = nil, nil
+
+local FIRST_PERSON_ARMS_VISIBLE = true
+
+return function()
+	local function Debug(...)
+		warn("[GunClient]", ...)
+	end
+
+	xpcall(function()
+		local UserInputService: UserInputService = service.UserInputService
+		local TweenService: TweenService = service.TweenService
+		local RunService: RunService = service.RunService
+		local Debris: Debris = service.Debris
+		local Players: Players = service.Players
+
+		local LocalPlayer: Player = Players.LocalPlayer
+
+		local _ammoGuiHidden, _ammoGuiPos = nil, nil
+
+		if FIRST_PERSON_ARMS_VISIBLE then
+			service.RunService.RenderStepped:Connect(function()
+				local char = LocalPlayer.Character
+				if not char then return end
+				for _, v in pairs(char:GetChildren()) do
+					if string.match(v.Name, "Arm") and not string.match(v.Name, "Ragdoll") then
+						v.LocalTransparencyModifier = 0
+					end
+				end
+			end)
+		end
+
+		local Caster = require(script.FastCast).new()
+
+		local function numLerp(A, B, Alpha)
+			return A + (B - A) * Alpha
+		end
+		local function rand(Min, Max, Accuracy)
+			local Inverse = 1 / (Accuracy or 1)
+			return math.random(Min * Inverse, Max * Inverse) / Inverse
+		end
+
+		local ReplicatedGunConfigs = service.ReplicatedStorage:WaitForChild("__GUN_CONFIGURATION_STORE")
+		local configCaches: {[string]:{[string]:any}} = {}
+
+		local function getFullConfig(toolName: string): {[string]:any}
+			local module: ModuleScript = ReplicatedGunConfigs:FindFirstChild(toolName)
+			if not module then
+				Debug("Config not found for", toolName)
+				return {}
+			end
+			local config = require(module)
+			for _, e in pairs({"Blood", "Explosion", "Hit", "Muzzle", "Particle", "Tracer"}) do
+				e ..= "Effect"
+				if not config["Folder_"..e] and module:FindFirstChild(e) then
+					config["Folder_"..e] = module[e]
+				end
+			end
+			if module.Name == "_Base" then return config end
+			if not config._ConfigTemplate then config._ConfigTemplate = "_Base" end
+			for setting, defaultValue in pairs(getFullConfig(config._ConfigTemplate)) do
+				if config[setting] == nil then
+					config[setting] = defaultValue
+				end
+			end
+			return config
+		end
+
+		Caster.LengthChanged:Connect(function(_, segmentOrigin, segmentDirection, length, bullet)
+			bullet.CFrame = CFrame.new(segmentOrigin, segmentOrigin + segmentDirection) * CFrame.new(0, 0, -(length - bullet.Size.Z / 2))
+		end)
+
+		client.Remote.Commands.RegisterGun = function(args)
+			local _initialSensitivity = UserInputService.MouseDeltaSensitivity
+
+			local gunClientId = client.Functions.GetRandom()
+
+			local connections: {RBXScriptConnection} = {}
+			local function connectEvent(event: RBXScriptSignal, callback: (any)->()): RBXScriptConnection?
+				if not event or not callback then return end
+				local conn = event:Connect(callback)
+				if conn then
+					connections[conn] = true
+				end
+				return conn
+			end
+
+			local Tool: Tool = args[1]
+			local Mouse = LocalPlayer:GetMouse()
+			local Camera = workspace.CurrentCamera
+			local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
+			local Humanoid = Character:FindFirstChildOfClass("Humanoid")
+
+			local Config = configCaches[Tool.Name]
+			if not Config then
+				configCaches[Tool.Name] = getFullConfig(Tool.Name)
+				Config = configCaches[Tool.Name]
+			end
+
+			local equipped, enabled, down, holdDown, singleHold, aimDown, scoping, reloading = false, true, false, false, false, false, false, false
+			local _mag: number, _ammo: number = Tool:GetAttribute("CurrentMag"), Tool:GetAttribute("CurrentAmmo")
+
+			local AmmoGui, updateGui = nil, nil
+			local Reload, ToggleFlashlight = nil, nil
+
+			local Overlay = script.GunOverlay:Clone()
+			Overlay.Name = client.Functions.GetRandom()
+			Overlay.Enabled = true
+			local CrosshairModule = require(Overlay.CrosshairModule)
+			local CameraModule = require(Overlay.CameraModule)(Config, RunService)
+
+			local handles: {BasePart} = {}
+			for _, v in ipairs(Tool:GetChildren()) do
+				if v.Name:sub(1, 6) == "Handle" then
+					table.insert(handles, v)
+				end
+			end
+			connectEvent(Tool.ChildAdded, function(c)
+				task.wait()
+				if c.Name:sub(1, 6) == "Handle" then
+					table.insert(handles, c)
+					local sorted = {}
+					for _, v in pairs(handles) do
+						table.insert(sorted, v.Name)
+					end
+					table.sort(sorted)
+					for i, v in ipairs(sorted) do
+						handles[i] = Tool[v]
+					end
+				end
+			end)
+			local CurrentHandle = handles[1]
+
+			local Remotes: Folder = Tool:WaitForChild("Remotes", 5)
+			if not Remotes then return end
+
+			local MarkerEvent: BindableEvent = service.New("BindableEvent", {
+				Name = "MarkerEvent"; Parent = Tool;
+			})
+
+			local function VisualizeMuzzle(firingHandle: BasePart)
+				if Config.MuzzleFlashEnabled then
+					task.spawn(function()
+						for _, v in pairs(firingHandle.GunMuzzle:GetChildren()) do
+							if v:GetAttribute("_IsMuzzleEffect") then
+								v:Emit(v:GetAttribute("EmitCount") or 1)
+							end
+						end				
+					end)
+				end
+				if Config.MuzzleLightEnabled then
+					Debris:addItem(service.New("PointLight", {
+						Parent = firingHandle.GunMuzzle;
+						Brightness = Config.MuzzleLightBrightness;
+						Color = Config.MuzzleLightColor;
+						Enabled = true;
+						Range = Config.MuzzleLightRange;
+						Shadows = Config.MuzzleLightShadows;
+					}), Config.MuzzleLightLifetime)
+				end
+			end
+
+			local function VisualizeBulletSet(plr: Player, setData: {Vector3}, firingHandle: BasePart)
+				for _, fireDirection in pairs(setData) do
+					local firePointObject: Attachment = firingHandle.GunMuzzle
+
+					Caster.Gravity = Config.DropGravity
+					Caster.ExtraForce = Vector3.new(Config.WindOffset.X, Config.WindOffset.Y, Config.WindOffset.Z)
+
+					local bullet: Part = service.New("Part", {
+						Name = "Bullet";
+						Material = Config.BulletMaterial;
+						Color = Config.BulletColor;
+						CanCollide = false;
+						Anchored = true;
+						Size = Vector3.new(Config.BulletSize.X, Config.BulletSize.Y, Config.BulletSize.Z);
+						Transparency = Config.BulletTransparency;
+						Shape = Config.BulletShape;
+					})
+					bullet:SetAttribute("_GUN_CLIENT_ID", gunClientId)
+					if Config.BulletMeshEnabled then
+						service.New("SpecialMesh", {
+							Parent = bullet;
+							Scale = Vector3.new(Config.BulletMeshScale.X, Config.BulletMeshScale.Y, Config.BulletMeshScale.Z);
+							MeshId = "rbxassetid://"..Config.BulletMeshId;
+							TextureId = "rbxassetid://"..Config.BulletTextureId;
+							MeshType = Enum.MeshType.FileMesh
+						})
+					end
+
+					bullet.CFrame = CFrame.new(firePointObject.WorldPosition, firePointObject.WorldPosition + fireDirection)
+					bullet.Parent = workspace.CurrentCamera
+
+					if Config.WhizSoundEnabled then
+						service.New("Sound", {
+							Parent = bullet;
+							Looped = true;
+							RollOffMaxDistance = 50;
+							RollOffMinDistance = 10;
+							SoundId = "rbxassetid://"..Config.WhizSoundId[math.random(1, #Config.WhizSoundId)];
+							Volume = Config.WhizSoundVolume; Pitch = Config.WhizSoundPitch
+						}):Play()				
+					end
+
+					if Config.BulletLightEnabled then
+						service.New("PointLight", {
+							Parent = bullet;
+							Brightness = Config.BulletLightBrightness;
+							Color = Config.BulletLightColor;
+							Enabled = true;
+							Range = Config.BulletLightRange;
+							Shadows = Config.BulletLightShadows;
+						})
+					end
+
+					if Config.BulletTracerEnabled then
+						local A0 = service.New("Attachment", {
+							Parent = bullet;
+							Name = "Attachment0";
+							Position = Vector3.new(Config.BulletTracerOffset0.X, Config.BulletTracerOffset0.Y, Config.BulletTracerOffset0.Z);
+						})
+						local A1 = service.New("Attachment", {
+							Parent = bullet;
+							Name = "Attachment1";
+							Position = Vector3.new(Config.BulletTracerOffset1.X, Config.BulletTracerOffset1.Y, Config.BulletTracerOffset1.Z);
+						})
+						for _, v in pairs(Config.Folder_TracerEffect:GetChildren()) do
+							if v:IsA("Trail") then
+								local tracer = v:Clone()
+								tracer.Parent = bullet
+								tracer.Attachment0 = A0
+								tracer.Attachment1 = A1
+							end
+						end
+					end
+
+					if Config.BulletParticleEnabled then
+						for _, v in pairs(Config.Folder_ParticleEffect:GetChildren()) do
+							if v:IsA("ParticleEmitter") then
+								local particle = v:Clone()
+								particle.Parent = bullet
+								particle.Enabled = true
+							end
+						end
+					end	
+
+					Caster:FireWithBlacklist(firePointObject.WorldPosition, fireDirection * Config.Range, Config.BulletSpeed, {service.UnWrap(firingHandle), service.UnWrap(Tool.Parent), service.UnWrap(workspace.CurrentCamera)}, service.UnWrap(bullet))
+				end
+			end
+
+			connectEvent(Caster.RayHit, function(hitPart: BasePart, HitPoint: Vector3, Normal: Vector3, Material: Enum.Material, bullet: BasePart)
+				if bullet:GetAttribute("_GUN_CLIENT_ID") ~= gunClientId then
+					return
+				end
+
+				Debris:AddItem(bullet, 4)
+				bullet.Transparency = 1
+				bullet.BrickColor = BrickColor.new("Really red")
+				bullet.CFrame = bullet.CFrame --// Makes the bullet stop traveling
+
+				for _, v in pairs(bullet:GetChildren()) do
+					if v:IsA("ParticleEmitter") then
+						v.Enabled = false
+					elseif v:IsA("Sound") or v:IsA("PointLight") then
+						v:Destroy()
+					end
+				end
+
+				local targetHum = hitPart and (hitPart.Parent:FindFirstChildOfClass("Humanoid") or hitPart.Parent.Parent:FindFirstChildOfClass("Humanoid"))
+				local targetChar = targetHum and targetHum.Parent
+				local targetTorso = targetChar and (if hitPart.Name == "Head" and hitPart.Parent == targetChar then hitPart else targetChar:FindFirstChild("HumanoidRootPart"))
+				local targetPlr = targetTorso and Players:GetPlayerFromCharacter(targetChar)
+				local tagger = Players:GetPlayerFromCharacter(Tool.Parent)
+
+				if not Config.ExplosiveEnabled and hitPart and (hitPart.Transparency < 0.9 or hitPart.Name == "HumanoidRootPart") then
+					if targetTorso and targetHum.Health > 0 then
+						task.spawn(function()
+							local surfaceCF = CFrame.new(HitPoint, HitPoint + Normal)
+							if Config.BloodEnabled then
+								local attachment = service.New("Attachment", {
+									CFrame = surfaceCF;
+									Parent = workspace.Terrain;
+								})
+								local sound = service.New("Sound", {
+									Parent = attachment;
+									SoundId = "rbxassetid://"..Config.HitCharSoundIds[math.random(1, #Config.HitCharSoundIds)];
+									PlaybackSpeed = Config.HitCharSoundPitch;
+									Volume = Config.HitCharSoundVolume;
+								})
+								if client.Variables.ParticlesEnabled then
+									task.spawn(function()
+										for _, v in pairs(Config.Folder_BloodEffect:GetChildren()) do
+											if v:IsA("ParticleEmitter") then
+												local particle = v:Clone()
+												particle.Parent = attachment
+												task.delay(0.01, function()
+													particle:Emit(particle:GetAttribute("EmitCount") or 1)
+													Debris:AddItem(particle, particle.Lifetime.Max)
+												end)
+											end
+										end
+										sound:Play()
+									end)
+								end
+								Debris:AddItem(attachment, 10)
+							end
+
+							if Config.FleshHole then
+								local hole = service.New("Part", {
+									Name = "FleshHole";
+									Transparency = 1;
+									Anchored = true;
+									CanCollide = false;
+									FormFactor = Enum.FormFactor.Custom;
+									Size = Vector3.new(1, 1, 0.2);
+									TopSurface = 0;
+									BottomSurface = 0;
+								})
+								service.New("BlockMesh", {
+									Parent = hole;
+									Offset = Vector3.new(0, 0, 0);
+									Scale = Vector3.new(Config.FleshHoleSize, Config.FleshHoleSize, 0);
+								})
+								local decal = service.New("Decal", {
+									Parent = hole;
+									Face = Enum.NormalId.Back;
+									Texture = "rbxassetid://"..Config.FleshHoleTextureIds[math.random(1, #Config.FleshHoleTextureIds)];
+									Color3 = Config.FleshHoleColor;
+								})
+								hole.Parent = workspace.CurrentCamera
+								hole.CFrame = surfaceCF * CFrame.Angles(0, 0, math.random(0, 360))
+								if not hitPart.Anchored then
+									service.New("Weld", {
+										Parent = hole;
+										Part0 = hitPart;
+										Part1 = hole;
+										C0 = hitPart.CFrame:toObjectSpace(surfaceCF * CFrame.Angles(0, 0, math.random(0, 360)));
+									})
+									hole.Anchored = false
+								end
+								task.delay(Config.FleshHoleVisibleTime, function()
+									if Config.FleshHoleVisibleTime > 0 then
+										local t0 = tick()
+										while true do
+											local Alpha = math.min((tick() - t0) / Config.FleshHoleFadeTime, 1)
+											decal.Transparency = numLerp(0, 1, Alpha)
+											if Alpha == 1 then break end
+											RunService.Heartbeat:Wait()
+										end
+									end
+									hole:Destroy()
+								end)
+							end
+						end)
+						if not Config.ExplosiveEnabled and tagger == LocalPlayer and (not targetPlr or not workspace:GetAttribute("_TeamkillDisabled") or not targetPlr.Team or tagger.Team ~= targetPlr) then
+							Remotes.InflictTarget:FireServer(targetTorso)
+							MarkerEvent:Fire(hitPart.Name == "Head" and Config.HeadshotDamageMultiplier > 1)
+						end
+					else
+						--// hit something non-alive
+						task.spawn(function()
+							local surfaceCF = CFrame.new(HitPoint, HitPoint + Normal)
+							if Config.HitEffectEnabled then		
+								local attachment = service.New("Attachment", {
+									CFrame = surfaceCF;
+									Parent = workspace.Terrain;
+								})
+								local sound = service.New("Sound", {
+									Parent = attachment;
+									SoundId = "rbxassetid://"..Config.HitSoundIds[math.random(1, #Config.HitSoundIds)];
+									PlaybackSpeed = Config.HitSoundPitch;
+									Volume = Config.HitSoundVolume;
+								})
+
+								if client.Variables.ParticlesEnabled then
+									local function spawnEffect(materialName: string)
+										if Config.Folder_HitEffect:FindFirstChild(materialName) then
+											for _, v in pairs(Config.Folder_HitEffect[materialName]:GetChildren()) do
+												local particle = v:Clone()
+												particle.Parent = attachment
+												if particle:GetAttribute("PartColor") then
+													particle.Color = ColorSequence.new(hitPart.Color, hitPart.Color)
+												end
+												task.delay(0.01, function()
+													particle:Emit(particle:GetAttribute("EmitCount") or 1)
+													Debris:AddItem(particle, particle.Lifetime.Max)
+												end)
+											end
+										end
+										sound:Play()
+									end
+									if Config.CustomHitEffect then
+										spawnEffect("Custom")
+									elseif
+										table.find({
+											"Brick", "Cobblestone", "Concrete", "CorrodedMetal", "DiamondPlate", "Fabric", "Foil", "ForceField", "Glass", "Granite",
+											"Grass", "Ice", "Marble", "Metal", "Neon", "Pebble", "Plastic", "Slate", "Sand", "SmoothPlastic", "Wood", "WoodPlanks"
+										}, hitPart.Material.Name)
+									then
+										spawnEffect(hitPart.Material.Name)
+									end
+								end
+
+								Debris:AddItem(attachment, 8)				
+							end
+
+							if Config.BulletHoleEnabled then
+								local hole = service.New("Part", {
+									Name = "BulletHole";
+									Transparency = 1;
+									Anchored = true;
+									CanCollide = false;
+									FormFactor = Enum.FormFactor.Custom;
+									Size = Vector3.new(1, 1, 0.2);
+									TopSurface = 0;
+									BottomSurface = 0
+								})
+								service.New("BlockMesh", {
+									Parent = hole;
+									Offset = Vector3.new(0, 0, 0);
+									Scale = Vector3.new(Config.BulletHoleSize, Config.BulletHoleSize, 0);
+								})
+								local decal = service.New("Decal", {
+									Parent = hole;
+									Face = Enum.NormalId.Front;
+									Texture = "rbxassetid://"..Config.BulletHoleTexture[math.random(1,#Config.BulletHoleTexture)];
+								})
+								if Config.PartColor then
+									decal.Color3 = hitPart.Color
+								end
+								hole.Parent = workspace.CurrentCamera
+								hole.CFrame = surfaceCF * CFrame.Angles(0, 0, math.random(0, 360))
+								if not hitPart.Anchored then
+									service.New("Weld", {
+										Parent = hole;
+										Part0 = hitPart;
+										Part1 = hole;
+										C0 = hitPart.CFrame:toObjectSpace(surfaceCF * CFrame.Angles(0, 0, math.random(0, 360)));
+									})
+									hole.Anchored = false
+								end
+								task.delay(Config.BulletHoleVisibleTime, function()
+									if Config.BulletHoleVisibleTime > 0 then
+										local t0 = tick()
+										while true do
+											local alpha = math.min((tick() - t0) / Config.BulletHoleFadeTime, 1)
+											decal.Transparency = numLerp(0, 1, alpha)
+											if alpha == 1 then break end
+											RunService.Heartbeat:Wait()
+										end
+									end
+									hole:Destroy()
+								end)
+							end
+						end)
+					end
+				elseif Config.ExplosiveEnabled then
+					if Config.ExplosionSoundEnabled then
+						service.New("Sound", {
+							Parent = bullet;
+							SoundId = "rbxassetid://"..Config.ExplosionSoundIds[math.random(1,#Config.ExplosionSoundIds)];
+							PlaybackSpeed = Config.ExplosionSoundPitch;
+							Volume = Config.ExplosionSoundVolume;
+						}):Play()	
+					end
+
+					local explosion: Explosion = service.New("Explosion", {
+						Parent = workspace.CurrentCamera;
+						BlastRadius = Config.ExplosionRadius;
+						BlastPressure = 0;
+						Position = HitPoint;
+					})
+
+					if Config.CustomExplosion then
+						explosion.Visible = false
+						local surfaceCF = CFrame.new(HitPoint, HitPoint + (Normal or Vector3.new(0, 0, 0)))
+
+						local attachment = service.New("Attachment")
+						attachment.CFrame = surfaceCF
+						attachment.Parent = workspace.Terrain
+
+						task.spawn(function()
+							for _, v in pairs(Config.Folder_ExplosionEffect:GetChildren()) do
+								local particle = v:Clone()
+								particle.Parent = attachment
+								task.delay(0.01, function()
+									if particle:IsA("ParticleEmitter") then
+										particle:Emit(particle:GetAttribute("EmitCount") or 1)
+										Debris:AddItem(particle, particle.Lifetime.Max)
+									else
+										particle.Enabled = true
+										Debris:AddItem(particle, 0.5)
+									end
+								end)
+							end
+						end)
+						Debris:AddItem(attachment, 10)
+					end	
+
+					if tagger == LocalPlayer then
+						local alreadyHit = {}
+						explosion.Hit:Connect(function(hit)
+							if hit and hit.Parent and (hit.Name == "HumanoidRootPart" or hit.Name == "Head") then
+								local hitHum = hit.Parent:FindFirstChildOfClass("Humanoid")
+								local hitPlr = hitHum and Players:GetPlayerFromCharacter(hit.Parent)
+								if hitHum and hitHum.Health > 0 and not alreadyHit[hitHum] and (tagger == hitPlr or not hitPlr or not workspace:GetAttribute("_TeamkillDisabled") or not hitPlr.Team or tagger.Team ~= hitPlr) then
+									alreadyHit[hitHum] = true
+									Remotes.InflictTarget:FireServer(hit)
+									MarkerEvent:Fire(hit.Name == "Head" and Config.HeadshotDamageMultiplier > 1)	
+								end
+							end
+						end)
+					end
+				end
+				--if onRayHitConnection then onRayHitConnection:Disconnect() end
+			end)
+
+			connectEvent(Remotes.VisualizeBulletSet.OnClientEvent, function(plr, ...)
+				if plr ~= LocalPlayer then VisualizeBulletSet(plr, ...) end
+			end)
+			connectEvent(Remotes.VisualizeMuzzle.OnClientEvent, function(plr, ...)
+				if plr ~= LocalPlayer then VisualizeMuzzle(...) end
+			end)
+			connectEvent(Remotes.ChangeMagAndAmmo.OnClientEvent, function()
+				_mag, _ammo = Tool:GetAttribute("CurrentMag"), Tool:GetAttribute("CurrentAmmo")
+				updateGui()
+			end)
+
+			for _, v in pairs(Config.Folder_MuzzleEffect:GetChildren()) do
+				for _, h in pairs(handles) do
+					local effect = v:Clone()
+					effect.Parent = h:WaitForChild("GunMuzzle")
+					effect:SetAttribute("_IsMuzzleEffect", true)
+				end
+			end
+
+			local function mountAmmoGui()
+				AmmoGui = client.UI.Make("Window", {
+					Name = "GunGui_"..Tool.Name;
+					Title = Tool.Name;
+					NoClose = true;
+					Size = {200, 110};
+					SizeLocked = true;
+					Position = _ammoGuiPos or if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled then UDim2.new(1, -210, 1, -170) else  UDim2.new(1, -210, 1, -250);
+					CanKeepAlive = false;
+					Walls = true;
+				})
+				AmmoGui:Add("Frame", {
+					Name = "Mag";
+					AnchorPoint = Vector2.new(0.5, 0);
+					BackgroundColor3 = Color3.fromRGB(225, 225, 225);
+					BackgroundTransparency = 0.5;
+					BorderColor3 = Color3.fromRGB(150, 150, 150);
+					BorderSizePixel = 1;
+					Position = UDim2.new(0.5, 0, 0, 10);
+					Size = UDim2.new(1, -20, 0, 26);
+					ClipsDescendants = false;
+					Children = {
+						{
+							Class = "Frame";
+							Name = "Fill";
+							--BackgroundColor3 = Color3.fromRGB(50, 50, 50);
+							BackgroundTransparency = 0.3;
+							Position = UDim2.fromOffset(0, 0);
+							Size = UDim2.fromScale(0, 1);
+							ClipsDescendants = false;
+							Children = {
+								{
+									Class = "UIGradient";
+									Color = ColorSequence.new(Color3.new(1, 1, 1), Color3.new(0, 0, 0));
+									--Transparency = NumberSequence.new(0.2);
+								}
+							};
+						},
+						{
+							Class = "TextLabel";
+							Name = "Status";
+							BackgroundTransparency = 1;
+							Position = UDim2.new(0.5, 4, 0.5, 0);
+							Size = UDim2.fromOffset(0, 0);
+							Font = "Arial";
+							Text = "";
+							TextSize = 16;
+							TextStrokeColor3 = Color3.fromRGB(225, 225, 225);
+							TextStrokeTransparency = 0.95;
+							ClipsDescendants = false
+						}
+					};
+				})
+				pcall(function()
+					AmmoGui.Mag:WaitForChild("Fill"):AddShadow()
+				end)
+				if _ammoGuiHidden then AmmoGui:Hide(true) end
+				local ammo = AmmoGui.Mag:Clone()
+				ammo.Name = "Ammo"
+				ammo.Position = UDim2.new(0.5, 0, 0, 46)
+				ammo.Parent = AmmoGui
+				AmmoGui:Ready()
+				updateGui()
+				return AmmoGui
+			end
+
+			local animations: {[string]:AnimationTrack} = {}
+			for _, v in ipairs({"Idle", "Fire", "Reload", "ShotgunClipin", "HoldDown", "Equip", "Aiming"}) do
+				if Config[v.."AnimationId"] ~= 0 then
+					animations[v] = (Humanoid:FindFirstChildOfClass("Animator") or Humanoid):LoadAnimation(Tool:WaitForChild(v.."Anim"))
+				end
+			end
+			local function playAnim(name: string)
+				local anim = animations[name]
+				if anim then
+					anim:Play(nil, nil, Config[name.."AnimationSpeed"])
+				end
+			end
+			local function stopAnim(name: string)
+				local anim = animations[name]
+				if anim then
+					anim:Stop()
+				end
+			end
+
+			local function playSound(name: string)
+				local sound = CurrentHandle:FindFirstChild(name)
+				if sound then
+					sound:Play()
+				end
+			end
+
+			connectEvent(MarkerEvent.Event, function(isHeadshot)
+				if Config.HitmarkerEnabled then
+					pcall(function()
+						if isHeadshot then
+							Overlay.Crosshair.Hitmarker.ImageColor3 = Config.HitmarkerColorHS
+							Overlay.Crosshair.Hitmarker.ImageTransparency = 0
+							TweenService:Create(Overlay.Crosshair.Hitmarker, TweenInfo.new(Config.HitmarkerFadeTimeHS, Enum.EasingStyle.Linear, Enum.EasingDirection.Out), {ImageTransparency = 1}):Play()
+							local markersound = Overlay.Crosshair.MarkerSound:Clone()
+							markersound.PlaybackSpeed = Config.HitmarkerSoundPitchHS
+							markersound.Parent = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+							markersound:Play()
+							Debris:AddItem(markersound, markersound.TimeLength)
+						else
+							Overlay.Crosshair.Hitmarker.ImageColor3 = Config.HitmarkerColor
+							Overlay.Crosshair.Hitmarker.ImageTransparency = 0
+							TweenService:Create(Overlay.Crosshair.Hitmarker, TweenInfo.new(Config.HitmarkerFadeTime, Enum.EasingStyle.Linear, Enum.EasingDirection.Out), {ImageTransparency = 1}):Play()
+							local markersound = Overlay.Crosshair.MarkerSound:Clone()
+							markersound.PlaybackSpeed = Config.HitmarkerSoundPitch
+							markersound.Parent = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+							markersound:Play()
+							Debris:AddItem(markersound, markersound.TimeLength)
+						end
+					end)
+				end
+			end)
+
+			function updateGui()
+				if AmmoGui then
+					local magSize, ammoSize = UDim2.fromScale(_mag/Config.AmmoPerMag, 1), UDim2.fromScale(_ammo/Config.MaxAmmo, 1) 
+					local magDisplay, ammoDisplay = AmmoGui:WaitForChild("Mag", 2), AmmoGui:WaitForChild("Ammo", 2)
+					if not magDisplay then return end
+					magDisplay.Fill:TweenSize(magSize, Enum.EasingDirection.Out, Enum.EasingStyle.Sine, 0.5, true)
+					ammoDisplay.Fill:TweenSize(ammoSize, Enum.EasingDirection.Out, Enum.EasingStyle.Sine, 0.5, true)
+
+					magDisplay.Status.Text = if reloading then "Reloading..." else _mag.."/"..Config.AmmoPerMag
+					ammoDisplay.Status.Text = _ammo.."/"..Config.MaxAmmo
+
+					ammoDisplay.Visible = Config.LimitedAmmo
+				end
+
+				if UserInputService.TouchEnabled --[[and not UserInputService.MouseEnabled]] then --// Roblox bug seemingly causes MouseEnabled to reflect true sometimes even on mobile clients(?)
+					Overlay.MobileButtons.Visible = true
+					Overlay.MobileButtons.AimButton.Visible = Config.IronsightEnabled or Config.SniperEnabled
+					Overlay.MobileButtons.HoldDownButton.Visible = Config.HoldDownEnabled
+				else
+					Overlay.MobileButtons.Visible = false
+				end
+
+				UserInputService.MouseIconEnabled = false
+			end
+
+			local function Fire(inputPos: Vector2)
+				down = true
+				local IsChargedShot = false
+				if equipped and enabled and down and not reloading and not holdDown  and _mag > 0 and Humanoid.Health > 0 then
+					enabled = false
+					if Config.ChargedShotEnabled then
+						playSound("Charge")
+						task.wait(Config.ChargingTime)
+						IsChargedShot = true
+					end
+					if Config.MinigunEnabled then
+						playSound("WindUp")
+						task.wait(Config.DelayBeforeFiring)
+					end
+					while equipped and not reloading and not holdDown  and (down or IsChargedShot) and _mag > 0 and Humanoid.Health > 0 do
+						IsChargedShot = false
+						VisualizeMuzzle(CurrentHandle)
+						Remotes.VisualizeMuzzle:FireServer(CurrentHandle)
+						for i = 1, if Config.BurstFireEnabled then Config.BulletPerBurst else 1 do
+							task.defer(function()
+								if Config.CameraRecoilEnabled then
+									local currentRecoil = Config.Recoil*(aimDown and 1 - Config.RecoilReduction or 1)
+									local recoilY = math.rad(currentRecoil * rand(0, 1, Config.RecoilAccuracy))
+									if (Character.Head.Position - Camera.CoordinateFrame.p).magnitude <= 2 then
+										CameraModule:accelerate(recoilY, 0, 0)
+									else
+										recoilY /= 2
+										local recoilX = math.rad(currentRecoil * rand(-1, 1, Config.RecoilAccuracy))
+										CameraModule:accelerate(recoilY, 0, recoilX)	    
+										task.delay(0.03, function()
+											CameraModule:accelerateXY(-recoilY, recoilX)
+										end)
+									end
+								end
+							end)
+							if Config.BulletShellEnabled then
+								local chamber = service.New("Part", {
+									Name = "Chamber";
+									Size = Vector3.new(0.01, 0.01, 0.01);
+									Transparency = 1;
+									Anchored = false;
+									CanCollide = false;
+									TopSurface = Enum.SurfaceType.SmoothNoOutlines;
+									BottomSurface = Enum.SurfaceType.SmoothNoOutlines;
+								})
+								service.New("Weld", {
+									Parent = chamber;
+									Part0 = CurrentHandle;
+									Part1 = chamber;
+									C0 = CFrame.new(Config.BulletShellOffset.X, Config.BulletShellOffset.Y, Config.BulletShellOffset.Z);
+								})
+								chamber.Position = (CurrentHandle.CFrame * CFrame.new(Config.BulletShellOffset.X, Config.BulletShellOffset.Y, Config.BulletShellOffset.Z)).p
+								chamber.Parent = workspace.CurrentCamera
+								task.defer(function()
+									local shell = service.New("Part", {
+										Name = "Shell";
+										CFrame = chamber.CFrame * CFrame.fromEulerAnglesXYZ(-2.5, 1, 1);
+										Size = Config.BulletShellSize;
+										CanCollide = Config.BulletShellCollisions;
+										Velocity = chamber.CFrame.lookVector * 20 + Vector3.new(math.random(-10, 10), 20, math.random(-10, 10));
+										RotVelocity = Vector3.new(0, 200, 0);
+									})
+									service.New("SpecialMesh", {
+										Parent = shell;
+										Scale = Config.BulletShellScale;
+										MeshId = "rbxassetid://"..Config.BulletShellMeshId;
+										TextureId = "rbxassetid://"..Config.BulletShellTextureId;
+										MeshType = Enum.MeshType.FileMesh;
+									})
+									shell.Parent = workspace.CurrentCamera
+									Debris:AddItem(shell, Config.BulletShellLifetime)
+								end)
+								Debris:AddItem(chamber, Config.BulletShellLifetime + 1)			
+							end
+							CrosshairModule.crossspring:accelerate(Config.CrossExpansion)
+							task.spawn(function()
+								local setData: {Vector3} = {}
+								for x = 1, Config.ShotgunEnabled and Config.BulletPerShot or 1 do
+									if not singleHold then playAnim("Fire") end
+									if not CurrentHandle.Fire.Playing or not CurrentHandle.Fire.Looped then
+										if Config.BoltBackAnimation then
+											CurrentHandle.Parent.Bolt.Transparency = 1
+											CurrentHandle.Parent.BoltBack.Transparency = 0 
+										end
+									end
+									local rayMag1 = Camera:ScreenPointToRay(
+										inputPos.X + math.random(-Config.SpreadX * 2, Config.SpreadX * 2) * (aimDown and 1-Config.IronsightSpreadReduction and 1-Config.SniperSpreadReduction or 1),
+										inputPos.Y + math.random(-Config.SpreadY * 2, Config.SpreadY * 2) * (aimDown and 1-Config.IronsightSpreadReduction and 1-Config.SniperSpreadReduction or 1)
+									)
+									table.insert(setData, (select(2, workspace:FindPartOnRay(Ray.new(rayMag1.Origin, rayMag1.Direction * 5000), Character)) -CurrentHandle:FindFirstChild("GunMuzzle").WorldPosition).Unit)
+								end
+								VisualizeBulletSet(LocalPlayer, setData, CurrentHandle)
+								Remotes.VisualizeBulletSet:FireServer(setData, CurrentHandle)
+							end)
+							_mag -= 1
+							Remotes.ChangeMagAndAmmo:FireServer(_mag, _ammo)
+							updateGui()
+							if Config.BurstFireEnabled then task.wait(Config.BurstRate) end
+							if _mag <= 0 then break end
+						end
+						local ind = table.find(handles, CurrentHandle)
+						CurrentHandle = if ind == #handles then handles[1] else handles[ind + 1]
+						if Config.BoltBackAnimation then
+							task.wait(Config.BoltBackDelay)
+							Tool.BoltBack.Transparency = 1
+							Tool.Bolt.Transparency = 0
+						end
+						task.wait(Config.FireRate)
+						if not Config.Auto then break end
+					end
+					local fireSound = CurrentHandle:FindFirstChild("Fire")
+					if fireSound and fireSound.Playing and fireSound.Looped then
+						fireSound:Stop()
+					end
+					if Config.MinigunEnabled then
+						playSound("WindDown")
+						task.wait(Config.DelayAfterFiring)
+					end
+					enabled = true
+					if _mag <= 0 then Reload() end
+				end
+			end
+
+			function Reload()
+				if not equipped then return end
+				if enabled and not reloading and (_ammo > 0 or not Config.LimitedAmmo) and _mag < Config.AmmoPerMag then
+					reloading = true
+					if aimDown then
+						TweenService:Create(Camera, TweenInfo.new(Config.TweenLengthNAD, Config.EasingStyleNAD, Config.EasingDirectionNAD), {FieldOfView = 70}):Play()
+						CrosshairModule:setcrossscale(1)
+						scoping = false
+						LocalPlayer.CameraMode = Enum.CameraMode.Classic
+						UserInputService.MouseDeltaSensitivity = _initialSensitivity
+						aimDown = false
+					end
+					updateGui()
+					if Config.ShotgunReload then
+						for i = 1, Config.AmmoPerMag - _mag do
+							playAnim("ShotgunClipin")
+							playSound("ShotgunClipin")
+							task.wait(Config.ShellClipinTime)
+						end
+					end
+					playAnim("Reload")
+					playSound("Reload")
+					task.wait(Config.ReloadTime)
+					if Config.LimitedAmmo then
+						local ammoToUse = math.min(Config.AmmoPerMag - _mag, _ammo)
+						_mag += ammoToUse
+						_ammo -= ammoToUse
+					else
+						_mag = Config.AmmoPerMag
+					end
+					Remotes.ChangeMagAndAmmo:FireServer(_mag, _ammo, true)
+					reloading = false
+					updateGui()
+				end
+			end
+
+			task.defer(function()
+				connectEvent(Overlay.MobileButtons.AimButton.MouseButton1Click, function()
+					if not reloading and not holdDown  and not aimDown and equipped and Config.IronsightEnabled and (Character.Head.Position - Camera.CoordinateFrame.p).magnitude <= 2 then
+						TweenService:Create(Camera, TweenInfo.new(Config.TweenLength, Config.EasingStyle, Config.EasingDirection), {FieldOfView = Config.IronsightFieldOfView}):Play()
+						CrosshairModule:setcrossscale(Config.IronsightCrossScale)
+						--Scoping = false
+						LocalPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
+						UserInputService.MouseDeltaSensitivity = _initialSensitivity * Config.IronsightMouseSensitivity
+						aimDown = true
+						playAnim("Aiming")
+					elseif not reloading and not holdDown and not aimDown and equipped and Config.SniperEnabled and (Character.Head.Position - Camera.CoordinateFrame.p).magnitude <= 2 then
+						TweenService:Create(Camera, TweenInfo.new(Config.TweenLength, Config.EasingStyle, Config.EasingDirection), {FieldOfView = Config.SniperFieldOfView}):Play()
+						CrosshairModule:setcrossscale(Config.SniperCrossScale)
+						local zoomsound = Overlay.Scope.ZoomSound:Clone()
+						zoomsound.Parent = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+						zoomsound:Play()
+						scoping = true
+						LocalPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
+						UserInputService.MouseDeltaSensitivity = _initialSensitivity * Config.SniperMouseSensitivity
+						aimDown = true
+						playAnim("Aiming")
+						Debris:AddItem(zoomsound, 5)
+					else
+						TweenService:Create(Camera, TweenInfo.new(Config.TweenLengthNAD, Config.EasingStyleNAD, Config.EasingDirectionNAD), {FieldOfView = 70}):Play()
+						CrosshairModule:setcrossscale(1)
+						scoping = false
+						LocalPlayer.CameraMode = Enum.CameraMode.Classic
+						UserInputService.MouseDeltaSensitivity = _initialSensitivity
+						aimDown = false
+						stopAnim("Aiming")
+					end
+				end)
+
+				connectEvent(Overlay.MobileButtons.HoldDownButton.MouseButton1Click, function()
+					if not reloading and not holdDown  and Config.HoldDownEnabled then
+						holdDown = true
+						stopAnim("Idle")
+						playAnim("HoldDown")
+						if aimDown then
+							TweenService:Create(Camera, TweenInfo.new(Config.TweenLengthNAD, Config.EasingStyleNAD, Config.EasingDirectionNAD), {FieldOfView = 70}):Play()
+							CrosshairModule:setcrossscale(1)
+							scoping = false
+							LocalPlayer.CameraMode = Enum.CameraMode.Classic
+							UserInputService.MouseDeltaSensitivity = _initialSensitivity
+							aimDown = false
+						end
+					else
+						holdDown = false
+						playAnim("Idle")
+						stopAnim("HoldDown")
+					end
+				end)
+
+				connectEvent(Overlay.MobileButtons.ReloadButton.MouseButton1Click, Reload)
+
+				connectEvent(Overlay.MobileButtons.FireButton.MouseButton1Down, function()
+					Fire(Overlay.Crosshair.AbsolutePosition)
+				end)
+				connectEvent(Overlay.MobileButtons.FireButton.MouseButton1Up, function()
+					down = false
+				end)
+			end)
+
+			connectEvent(Mouse.Button1Down, function()
+				if not UserInputService.TouchEnabled then
+					Fire(Mouse)
+				end
+			end)
+			connectEvent(Mouse.Button1Up, function()
+				if not UserInputService.TouchEnabled then
+					down = false
+				end
+			end)
+
+			local flashlightDebounce = false
+			function ToggleFlashlight()
+				flashlightDebounce = true
+				Remotes.Flashlight:FireServer()
+				task.delay(0.5, function()
+					flashlightDebounce = false
+				end)
+			end
+
+			local toolEquippedConnections = {}
+
+			connectEvent(Tool.Equipped, function()
+				for _, v in pairs(toolEquippedConnections) do if v then v:Disconnect() end end
+				Overlay.Parent = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+				if Config.AmmoPerMag == math.huge then AmmoGui = nil else mountAmmoGui() end
+				updateGui()
+				playSound("Equip")
+				if Config.WalkSpeedReductionEnabled then
+					Humanoid.WalkSpeed -= Config.WalkSpeedReduction
+				end
+				equipped = true
+				CrosshairModule:setcrosssettings(Config.CrossSize, Config.CrossSpeed, Config.CrossDamper)
+				UserInputService.MouseIconEnabled = false
+				playAnim("Equip")
+				playAnim("Idle")
+				toolEquippedConnections = {
+					connectEvent(UserInputService.InputBegan, function(inputObj, processed)
+						if processed or not equipped or inputObj.UserInputType ~= Enum.UserInputType.Keyboard then return end
+						if inputObj.KeyCode == Config.Key_Reload then
+							Reload()
+						elseif inputObj.KeyCode == Config.Key_HoldDown then
+							if not reloading and not holdDown and Config.HoldDownEnabled then
+								holdDown = true
+								stopAnim("Idle")
+								playAnim("HoldDown")
+								if aimDown then 
+									TweenService:Create(Camera, TweenInfo.new(Config.TweenLengthNAD, Config.EasingStyleNAD, Config.EasingDirectionNAD), {FieldOfView = 70}):Play()
+									CrosshairModule:setcrossscale(1)
+									scoping = false
+									LocalPlayer.CameraMode = Enum.CameraMode.Classic
+									UserInputService.MouseDeltaSensitivity = _initialSensitivity
+									aimDown = false
+								end
+							else
+								holdDown = false
+								playAnim("Idle")
+								stopAnim("HoldDown")
+							end
+						elseif inputObj.KeyCode == Config.Key_Flashlight and Tool:GetAttribute("FlashlightEnabled") and not flashlightDebounce then
+							ToggleFlashlight()
+						elseif inputObj.KeyCode == Config.Key_SingleHold and (Config.SingleHoldEnabled or LocalPlayer:GetAttribute("CanSingleHoldGuns")) then
+							if singleHold then
+								singleHold = false
+								playAnim("Idle")
+							else
+								singleHold = true
+								stopAnim("Idle")
+							end
+						end
+					end),
+					connectEvent(Mouse.Button2Down, function()
+						if reloading or holdDown  or aimDown or not equipped or (Character.Head.Position - Camera.CoordinateFrame.p).magnitude > 2 then return end
+						if Config.IronsightEnabled then
+							TweenService:Create(Camera, TweenInfo.new(Config.TweenLength, Config.EasingStyle, Config.EasingDirection), {FieldOfView = Config.IronsightFieldOfView}):Play()
+							CrosshairModule:setcrossscale(Config.IronsightCrossScale)
+							LocalPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
+							UserInputService.MouseDeltaSensitivity = _initialSensitivity * Config.IronsightMouseSensitivity
+							aimDown = true
+							playAnim("Aiming")
+						elseif Config.SniperEnabled then
+							TweenService:Create(Camera, TweenInfo.new(Config.TweenLength, Config.EasingStyle, Config.EasingDirection), {FieldOfView = Config.SniperFieldOfView}):Play()
+							CrosshairModule:setcrossscale(Config.SniperCrossScale)
+							local zoomsound = Overlay.Scope.ZoomSound:Clone()
+							zoomsound.Parent = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+							zoomsound:Play()
+							scoping = true
+							LocalPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
+							UserInputService.MouseDeltaSensitivity = _initialSensitivity * Config.SniperMouseSensitivity
+							aimDown = true
+							playAnim("Aiming")
+							Debris:AddItem(zoomsound, zoomsound.TimeLength)
+						end
+					end),
+					connectEvent(Mouse.Button2Up, function()
+						if aimDown then
+							TweenService:Create(Camera, TweenInfo.new(Config.TweenLengthNAD, Config.EasingStyleNAD, Config.EasingDirectionNAD), {FieldOfView = 70}):Play()
+							CrosshairModule:setcrossscale(1)
+							scoping = false
+							LocalPlayer.CameraMode = Enum.CameraMode.Classic
+							UserInputService.MouseDeltaSensitivity = _initialSensitivity
+							aimDown = false
+							stopAnim("Aiming")
+						end
+					end)
+				}
+			end)
+
+			connectEvent(Tool.Unequipped, function()
+				holdDown , equipped = false, false
+				Overlay.Parent = script
+				if AmmoGui then
+					_ammoGuiHidden = not AmmoGui.IsVisible
+					_ammoGuiPos = AmmoGui.Dragger.Position
+					AmmoGui:Close()
+				end
+				if Config.WalkSpeedReductionEnabled then
+					Humanoid.WalkSpeed += Config.WalkSpeedReduction
+				end
+				local otherGun = LocalPlayer.Character:FindFirstChildOfClass("Tool")
+				if not otherGun or not service.CollectionService:HasTag(otherGun, "ADONIS_GUN") then
+					UserInputService.MouseIconEnabled = true
+				end
+				stopAnim("Idle")
+				stopAnim("Aiming")
+				stopAnim("Equip")
+				stopAnim("Reload")
+				stopAnim("HoldDown")
+				if aimDown then
+					TweenService:Create(Camera, TweenInfo.new(Config.TweenLengthNAD, Config.EasingStyleNAD, Config.EasingDirectionNAD), {FieldOfView = 70}):Play()
+					CrosshairModule:setcrossscale(1)
+					scoping = false
+					LocalPlayer.CameraMode = Enum.CameraMode.Classic
+					UserInputService.MouseDeltaSensitivity = _initialSensitivity
+					aimDown = false
+				end
+				for _, v in pairs(toolEquippedConnections) do
+					if v then v:Disconnect() end
+				end
+			end)
+
+			connectEvent(Humanoid.Died, function()
+				Humanoid:UnequipTools()
+				holdDown, equipped = false, false
+				Overlay.Parent = script
+				if AmmoGui then
+					_ammoGuiHidden, _ammoGuiPos = nil, nil
+					AmmoGui:Close()
+				end
+				if Config.WalkSpeedReductionEnabled then
+					Humanoid.WalkSpeed += Config.WalkSpeedReduction
+				end
+				UserInputService.MouseIconEnabled = true
+				stopAnim("Idle")
+				stopAnim("HoldDown")
+				if aimDown then
+					TweenService:Create(Camera, TweenInfo.new(Config.TweenLengthNAD, Config.EasingStyleNAD, Config.EasingDirectionNAD), {FieldOfView = 70}):Play()
+					CrosshairModule:setcrossscale(1)
+					scoping = false
+					LocalPlayer.CameraMode = Enum.CameraMode.Classic
+					UserInputService.MouseDeltaSensitivity = _initialSensitivity
+					aimDown = false
+				end
+			end)
+
+			local lastTick = tick()
+			RunService:BindToRenderStep("Mouse", Enum.RenderPriority.Input.Value, function()
+				local deltaTime = tick() - lastTick
+				lastTick = tick()
+
+				if scoping --[[and UserInputService.MouseEnabled]] and UserInputService.KeyboardEnabled then
+					Overlay.Scope.Size = UDim2.new(numLerp(Overlay.Scope.Size.X.Scale, 1.2, math.min(deltaTime * 5, 1)), 36, numLerp(Overlay.Scope.Size.Y.Scale, 1.2, math.min(deltaTime * 5, 1)), 36)
+					Overlay.Scope.Position = UDim2.new(0, Mouse.X - Overlay.Scope.AbsoluteSize.X / 2, 0, Mouse.Y - Overlay.Scope.AbsoluteSize.Y / 2)
+				elseif scoping and UserInputService.TouchEnabled --[[and not UserInputService.MouseEnabled]] and not UserInputService.KeyboardEnabled then
+					Overlay.Scope.Size = UDim2.new(numLerp(Overlay.Scope.Size.X.Scale, 1.2, math.min(deltaTime * 5, 1)), 36, numLerp(Overlay.Scope.Size.Y.Scale, 1.2, math.min(deltaTime * 5, 1)), 36)
+					Overlay.Scope.Position = UDim2.new(0, Overlay.Crosshair.AbsolutePosition.X - Overlay.Scope.AbsoluteSize.X / 2, 0, Overlay.Crosshair.AbsolutePosition.Y - Overlay.Scope.AbsoluteSize.Y / 2)
+				else
+					Overlay.Scope.Size = UDim2.new(0.6, 36, 0.6, 36)
+					Overlay.Scope.Position = UDim2.fromScale(0, 0)
+				end
+
+				Overlay.Scope.Visible = scoping
+
+				if UserInputService.TouchEnabled --[[and not UserInputService.MouseEnabled]] and not UserInputService.KeyboardEnabled and (Character.Head.Position - Camera.CoordinateFrame.p).magnitude <= 2 then
+					Overlay.Crosshair.Position = UDim2.new(0.5, -1, 0.5, -19)
+				else
+					Overlay.Crosshair.Position = UDim2.fromOffset(Mouse.X, Mouse.Y)
+				end
+			end)
+
+			Tool.AncestryChanged:Connect(function(_, parent)
+				if not parent or not (parent:IsA("Backpack") or Players:GetPlayerFromCharacter(Tool.Parent)) then
+					for conn in pairs(connections) do
+						conn:Disconnect()
+					end
+				end
+			end)
+		end
+
+		Debug("Loaded")
+	end, function(err)
+		Debug("Failed to load:", err)
+	end)
+end
+
+--// Expertcoderz Laboratories 2022
