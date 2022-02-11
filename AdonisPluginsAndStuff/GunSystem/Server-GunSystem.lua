@@ -342,9 +342,9 @@ return function()
 				for _, v in pairs(service.Players:GetPlayers()) do
 					server.Remote.Send(v, "RegisterGun", tool)
 				end
-				self.clientsRegisterConn = service.Players.PlayerAdded:Connect(function(plr)
+				table.insert(self.connections, service.Players.PlayerAdded:Connect(function(plr)
 					server.Remote.Send(plr, "RegisterGun", tool)
-				end)
+				end))
 
 				return self
 			end, function(err)
