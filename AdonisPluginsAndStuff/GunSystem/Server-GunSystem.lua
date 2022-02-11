@@ -309,7 +309,7 @@ return function()
 					end,
 					ChangeMagAndAmmo = function(plr: Player, mag: number, ammo: number, reloading: boolean?)
 						if not tonumber(mag) or not tonumber(ammo) or ammo > tool:GetAttribute("CurrentAmmo") or mag > self.config.AmmoPerMag then
-							server.Anti.Detected(plr, "kick", "[Gun System] Attempt to set mag/ammo to an illegal size")
+							server.Anti.Detected(plr, "kick", "[Gun System] Attempt to set mag/ammo to an illegal value")
 							return
 						end
 						tool:SetAttribute("CurrentMag", mag)
