@@ -188,8 +188,8 @@ return function()
 					if v:GetAttribute("Camo") or (v.Name == "Camo" and v:IsA("BasePart")) then
 						local originalBrickColor = v:GetAttribute("OriginalCamoBrickColor")
 						if not originalBrickColor then
-							v:SetAttribute("OriginalCamoBrickColor", v.BrickColor)
 							originalBrickColor = v.BrickColor
+							v:SetAttribute("OriginalCamoBrickColor", originalBrickColor)
 						end
 						self.camoPartOriginals[v] = originalBrickColor
 					end
