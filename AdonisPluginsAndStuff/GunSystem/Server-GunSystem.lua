@@ -299,7 +299,7 @@ return function()
 								table.foreach(effect, function(key, val)
 									context[key] = val
 								end)
-								xpcall(specialEffects[effect.Effect], function(err)
+								xpcall(if type(effect) == "table" then specialEffects[effect.Effect] else effect, function(err)
 									Debug("SpecialEffect application error:", err)
 								end, context, targetHum.Parent)
 							end
