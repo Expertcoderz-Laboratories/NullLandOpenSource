@@ -130,7 +130,7 @@ return function()
 			local self = {Root = tool;}
 			setmetatable(self, Gun)
 
-			if tool:FindFirstAncestorOfClass("ServerStorage") or (tool.Parent and tool.Parent:IsA("Model") and not service.Players:GetPlayerFromCharacter(tool)) then
+			if tool.Parent and not tool.Parent:IsA("Backpack") and not service.Players:GetPlayerFromCharacter(tool.Parent) then
 				return nil
 			end
 
