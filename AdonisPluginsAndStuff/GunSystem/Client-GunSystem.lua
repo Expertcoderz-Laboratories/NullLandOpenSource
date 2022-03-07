@@ -761,7 +761,7 @@ return function()
 								if Config.CameraRecoilEnabled then
 									local currentRecoil = Config.Recoil*(aimDown and 1 - Config.RecoilReduction or 1)
 									local recoilY = math.rad(currentRecoil * rand(0, 1, Config.RecoilAccuracy))
-									if (Character.Head.Position - Camera.CoordinateFrame.p).magnitude <= 2 then
+									if (Character.Head.Position - Camera.CoordinateFrame.p).Magnitude <= 2 then
 										CameraModule:accelerate(recoilY, 0, 0)
 									else
 										recoilY /= 2
@@ -903,7 +903,7 @@ return function()
 
 			task.defer(function()
 				connectEvent(Overlay.MobileButtons.AimButton.MouseButton1Click, function()
-					if not reloading and not holdDown  and not aimDown and equipped and Config.IronsightEnabled and (Character.Head.Position - Camera.CoordinateFrame.p).magnitude <= 2 then
+					if not reloading and not holdDown  and not aimDown and equipped and Config.IronsightEnabled and (Character.Head.Position - Camera.CoordinateFrame.p).Magnitude <= 2 then
 						TweenService:Create(Camera, TweenInfo.new(Config.TweenLength, Config.EasingStyle, Config.EasingDirection), {FieldOfView = Config.IronsightFieldOfView}):Play()
 						CrosshairModule:setcrossscale(Config.IronsightCrossScale)
 						--Scoping = false
@@ -911,7 +911,7 @@ return function()
 						UserInputService.MouseDeltaSensitivity = _initialSensitivity * Config.IronsightMouseSensitivity
 						aimDown = true
 						playAnim("Aiming")
-					elseif not reloading and not holdDown and not aimDown and equipped and Config.SniperEnabled and (Character.Head.Position - Camera.CoordinateFrame.p).magnitude <= 2 then
+					elseif not reloading and not holdDown and not aimDown and equipped and Config.SniperEnabled and (Character.Head.Position - Camera.CoordinateFrame.p).Magnitude <= 2 then
 						TweenService:Create(Camera, TweenInfo.new(Config.TweenLength, Config.EasingStyle, Config.EasingDirection), {FieldOfView = Config.SniperFieldOfView}):Play()
 						CrosshairModule:setcrossscale(Config.SniperCrossScale)
 						local zoomsound = Overlay.Scope.ZoomSound:Clone()
@@ -1036,7 +1036,7 @@ return function()
 						end
 					end),
 					connectEvent(Mouse.Button2Down, function()
-						if reloading or holdDown  or aimDown or not equipped or (Character.Head.Position - Camera.CoordinateFrame.p).magnitude > 2 then return end
+						if reloading or holdDown  or aimDown or not equipped or (Character.Head.Position - Camera.CoordinateFrame.p).Magnitude > 2 then return end
 						if Config.IronsightEnabled then
 							TweenService:Create(Camera, TweenInfo.new(Config.TweenLength, Config.EasingStyle, Config.EasingDirection), {FieldOfView = Config.IronsightFieldOfView}):Play()
 							CrosshairModule:setcrossscale(Config.IronsightCrossScale)
