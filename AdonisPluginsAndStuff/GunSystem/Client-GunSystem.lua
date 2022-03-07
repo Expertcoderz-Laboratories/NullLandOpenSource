@@ -3,11 +3,16 @@
 	Description: The clientside component of the Adonis Gun System; handles most of the visuals & controls.
 	Author: Expertcoderz
 	Release Date: 2022-02-11 (project started in December 2021; originated from Aug/Sep 2021)
+	Last Updated: 2022-03-07
 --]]
 
 client, service = nil, nil
 
 local FIRST_PERSON_ARMS_VISIBLE = true
+
+local AMMO_BAR_EASING_STYLE, AMMO_BAR_TWEEN_DURATION = Enum.EasingStyle.Sine, 0.5
+local MAG_BAR_EASING_STYLE, MAG_BAR_TWEEN_DURATION = Enum.EasingStyle.Sine, 0.5
+local RELOADING_TEXT = "Reloading..."
 
 return function()
 	local function Debug(...)
@@ -23,7 +28,46 @@ return function()
 
 		local LocalPlayer: Player = Players.LocalPlayer
 
+		local Caster = require(script.FastCast).new()
+		local Mouse = LocalPlayer:GetMouse()
+		local Camera = workspace.CurrentCamera
+		workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+			Camera = workspace.CurrentCamera
+		end)
+
 		local _ammoGuiHidden, _ammoGuiPos = nil, nil
+
+		local ReplicatedGunConfigs = service.ReplicatedStorage:WaitForChild("__GUN_CONFIGURATION_STORE")
+		local configCaches: {[string]:{[string]:any}} = {}
+
+		local create: (className: string, propertiesOrParent: {[string]:any}|Instance)->(Instance)
+			= service.New
+		local function edit(object: Instance, properties: {[string]:any}): Instance
+			for prop, val in pairs(properties) do
+				object[prop] = val
+			end
+			return object
+		end
+
+		local function numLerp(a, b, alpha)
+			return a + (b - a) * alpha
+		end
+		local function rand(min: number, max: number, accuracy: number?): number
+			local inverse = 1 / (accuracy or 1)
+			return math.random(min * inverse, max * inverse) / inverse
+		end
+		local function getAssetUri(assetId: string|number): string
+			return if type(assetId) == "number" then "rbxassetid://"..assetId else assetId
+		end
+		local function chooseRandAssetId(list: {string|number}): string?
+			return getAssetUri(list[math.random(1, #list)])
+		end
+		local function getDistanceFromCharacter(point: Vector3): number
+			if not LocalPlayer.Character or not LocalPlayer.Character.PrimaryPart then
+				return 0
+			end
+			return (point - LocalPlayer.Character.PrimaryPart.Position).Magnitude
+		end
 
 		if FIRST_PERSON_ARMS_VISIBLE then
 			service.RunService.RenderStepped:Connect(function()
@@ -36,19 +80,6 @@ return function()
 				end
 			end)
 		end
-
-		local Caster = require(script.FastCast).new()
-
-		local function numLerp(A, B, Alpha)
-			return A + (B - A) * Alpha
-		end
-		local function rand(Min, Max, Accuracy)
-			local Inverse = 1 / (Accuracy or 1)
-			return math.random(Min * Inverse, Max * Inverse) / Inverse
-		end
-
-		local ReplicatedGunConfigs = service.ReplicatedStorage:WaitForChild("__GUN_CONFIGURATION_STORE")
-		local configCaches: {[string]:{[string]:any}} = {}
 
 		local function getFullConfig(toolName: string): {[string]:any}
 			local module: ModuleScript = ReplicatedGunConfigs:FindFirstChild(toolName)
@@ -63,8 +94,15 @@ return function()
 					config["Folder_"..e] = module[e]
 				end
 			end
-			if module.Name == "_Base" then return config end
-			if not config._ConfigTemplate then config._ConfigTemplate = "_Base" end
+			if config._Modifier then
+				task.defer(config._Modifier, config, service, client)
+			end
+			if module.Name == "_Base" then
+				return config
+			end
+			if not config._ConfigTemplate then
+				config._ConfigTemplate = "_Base"
+			end
 			for setting, defaultValue in pairs(getFullConfig(config._ConfigTemplate)) do
 				if config[setting] == nil then
 					config[setting] = defaultValue
@@ -93,8 +131,7 @@ return function()
 			end
 
 			local Tool: Tool = args[1]
-			local Mouse = LocalPlayer:GetMouse()
-			local Camera = workspace.CurrentCamera
+
 			local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
 			local Humanoid = Character:FindFirstChildOfClass("Humanoid")
 
@@ -141,8 +178,8 @@ return function()
 			local Remotes: Folder = Tool:WaitForChild("Remotes", 5)
 			if not Remotes then return end
 
-			local MarkerEvent: BindableEvent = service.New("BindableEvent", {
-				Name = "MarkerEvent"; Parent = Tool;
+			local MarkerEvent: BindableEvent = create("BindableEvent", {
+				Parent = Tool; Name = client.Functions.GetRandom();--"MarkerEvent"; 
 			})
 
 			local function VisualizeMuzzle(firingHandle: BasePart)
@@ -156,7 +193,7 @@ return function()
 					end)
 				end
 				if Config.MuzzleLightEnabled then
-					Debris:addItem(service.New("PointLight", {
+					Debris:AddItem(create("PointLight", {
 						Parent = firingHandle.GunMuzzle;
 						Brightness = Config.MuzzleLightBrightness;
 						Color = Config.MuzzleLightColor;
@@ -174,7 +211,7 @@ return function()
 					Caster.Gravity = Config.DropGravity
 					Caster.ExtraForce = Vector3.new(Config.WindOffset.X, Config.WindOffset.Y, Config.WindOffset.Z)
 
-					local bullet: Part = service.New("Part", {
+					local bullet: Part = create("Part", {
 						Name = "Bullet";
 						Material = Config.BulletMaterial;
 						Color = Config.BulletColor;
@@ -186,32 +223,37 @@ return function()
 					})
 					bullet:SetAttribute("_GUN_CLIENT_ID", gunClientId)
 					if Config.BulletMeshEnabled then
-						service.New("SpecialMesh", {
+						create("SpecialMesh", {
 							Parent = bullet;
 							Scale = Vector3.new(Config.BulletMeshScale.X, Config.BulletMeshScale.Y, Config.BulletMeshScale.Z);
-							MeshId = "rbxassetid://"..Config.BulletMeshId;
-							TextureId = "rbxassetid://"..Config.BulletTextureId;
+							MeshId = getAssetUri(Config.BulletMeshId);
+							TextureId = getAssetUri(Config.BulletTextureId);
 							MeshType = Enum.MeshType.FileMesh
 						})
 					end
-
-					bullet.CFrame = CFrame.new(firePointObject.WorldPosition, firePointObject.WorldPosition + fireDirection)
-					bullet.Parent = workspace.CurrentCamera
+					
+					edit(bullet, {
+						Parent = Camera;
+						CFrame = CFrame.new(firePointObject.WorldPosition, firePointObject.WorldPosition + fireDirection);
+					})
 
 					if Config.WhizSoundEnabled then
-						service.New("Sound", {
+						create("Sound", {
 							Parent = bullet;
+							Name = "WhizSound";
 							Looped = true;
 							RollOffMaxDistance = 50;
 							RollOffMinDistance = 10;
-							SoundId = "rbxassetid://"..Config.WhizSoundId[math.random(1, #Config.WhizSoundId)];
-							Volume = Config.WhizSoundVolume; Pitch = Config.WhizSoundPitch
-						}):Play()				
+							SoundId = chooseRandAssetId(Config.WhizSoundIds);
+							Volume = Config.WhizSoundVolume;
+							Pitch = Config.WhizSoundPitch;
+						}):Play()
 					end
 
 					if Config.BulletLightEnabled then
-						service.New("PointLight", {
+						create("PointLight", {
 							Parent = bullet;
+							Name = "BulletLight";
 							Brightness = Config.BulletLightBrightness;
 							Color = Config.BulletLightColor;
 							Enabled = true;
@@ -221,22 +263,23 @@ return function()
 					end
 
 					if Config.BulletTracerEnabled then
-						local A0 = service.New("Attachment", {
+						local A0 = create("Attachment", {
 							Parent = bullet;
 							Name = "Attachment0";
 							Position = Vector3.new(Config.BulletTracerOffset0.X, Config.BulletTracerOffset0.Y, Config.BulletTracerOffset0.Z);
 						})
-						local A1 = service.New("Attachment", {
+						local A1 = create("Attachment", {
 							Parent = bullet;
 							Name = "Attachment1";
 							Position = Vector3.new(Config.BulletTracerOffset1.X, Config.BulletTracerOffset1.Y, Config.BulletTracerOffset1.Z);
 						})
 						for _, v in pairs(Config.Folder_TracerEffect:GetChildren()) do
 							if v:IsA("Trail") then
-								local tracer = v:Clone()
-								tracer.Parent = bullet
-								tracer.Attachment0 = A0
-								tracer.Attachment1 = A1
+								edit(v:Clone(), {
+									Parent = bullet;
+									Attachment0 = A0;
+									Attachment1 = A1;
+								})
 							end
 						end
 					end
@@ -244,14 +287,15 @@ return function()
 					if Config.BulletParticleEnabled then
 						for _, v in pairs(Config.Folder_ParticleEffect:GetChildren()) do
 							if v:IsA("ParticleEmitter") then
-								local particle = v:Clone()
-								particle.Parent = bullet
-								particle.Enabled = true
+								edit(v:Clone(), {
+									Parent = bullet;
+									Enabled = true;
+								})
 							end
 						end
 					end	
 
-					Caster:FireWithBlacklist(firePointObject.WorldPosition, fireDirection * Config.Range, Config.BulletSpeed, {service.UnWrap(firingHandle), service.UnWrap(Tool.Parent), service.UnWrap(workspace.CurrentCamera)}, service.UnWrap(bullet))
+					Caster:FireWithBlacklist(firePointObject.WorldPosition, fireDirection * Config.Range, Config.BulletSpeed, {service.UnWrap(firingHandle), service.UnWrap(Tool.Parent), service.UnWrap(Camera)}, service.UnWrap(bullet))
 				end
 			end
 
@@ -261,9 +305,11 @@ return function()
 				end
 
 				Debris:AddItem(bullet, 4)
-				bullet.Transparency = 1
-				bullet.BrickColor = BrickColor.new("Really red")
-				bullet.CFrame = bullet.CFrame --// Makes the bullet stop traveling
+				edit(bullet, {
+					Transparency = 1;
+					BrickColor = BrickColor.new("Really red");
+					CFrame = bullet.CFrame; --// Makes the bullet stop traveling
+				})
 
 				for _, v in pairs(bullet:GetChildren()) do
 					if v:IsA("ParticleEmitter") then
@@ -283,14 +329,14 @@ return function()
 					if targetTorso and targetHum.Health > 0 then
 						task.spawn(function()
 							local surfaceCF = CFrame.new(HitPoint, HitPoint + Normal)
-							if Config.BloodEnabled then
-								local attachment = service.New("Attachment", {
+							if Config.BloodEnabled and getDistanceFromCharacter(HitPoint) <= Config.BloodEffectMaxVisibleDistance then
+								local attachment = create("Attachment", {
 									CFrame = surfaceCF;
 									Parent = workspace.Terrain;
 								})
-								local sound = service.New("Sound", {
+								local sound = #Config.HitCharSoundIds > 0 and create("Sound", {
 									Parent = attachment;
-									SoundId = "rbxassetid://"..Config.HitCharSoundIds[math.random(1, #Config.HitCharSoundIds)];
+									SoundId = chooseRandAssetId(Config.HitCharSoundIds);
 									PlaybackSpeed = Config.HitCharSoundPitch;
 									Volume = Config.HitCharSoundVolume;
 								})
@@ -306,15 +352,17 @@ return function()
 												end)
 											end
 										end
-										sound:Play()
+										if sound then
+											sound:Play()
+										end
 									end)
 								end
 								Debris:AddItem(attachment, 10)
 							end
 
-							if Config.FleshHole then
-								local hole = service.New("Part", {
-									Name = "FleshHole";
+							if Config.FleshHoleEnabled and getDistanceFromCharacter(HitPoint) <= Config.FleshHoleMaxVisibleDistance then
+								local hole = create("Part", {
+									Name = "FleshHoleEnabled";
 									Transparency = 1;
 									Anchored = true;
 									CanCollide = false;
@@ -323,21 +371,23 @@ return function()
 									TopSurface = 0;
 									BottomSurface = 0;
 								})
-								service.New("BlockMesh", {
+								create("BlockMesh", {
 									Parent = hole;
 									Offset = Vector3.new(0, 0, 0);
 									Scale = Vector3.new(Config.FleshHoleSize, Config.FleshHoleSize, 0);
 								})
-								local decal = service.New("Decal", {
+								local decal = create("Decal", {
 									Parent = hole;
 									Face = Enum.NormalId.Back;
-									Texture = "rbxassetid://"..Config.FleshHoleTextureIds[math.random(1, #Config.FleshHoleTextureIds)];
+									Texture = chooseRandAssetId(Config.FleshHoleTextureIds);
 									Color3 = Config.FleshHoleColor;
 								})
-								hole.Parent = workspace.CurrentCamera
-								hole.CFrame = surfaceCF * CFrame.Angles(0, 0, math.random(0, 360))
+								edit(hole, {
+									Parent = Camera;
+									CFrame = surfaceCF * CFrame.Angles(0, 0, math.random(0, 360));
+								})
 								if not hitPart.Anchored then
-									service.New("Weld", {
+									create("Weld", {
 										Parent = hole;
 										Part0 = hitPart;
 										Part1 = hole;
@@ -367,14 +417,14 @@ return function()
 						--// hit something non-alive
 						task.spawn(function()
 							local surfaceCF = CFrame.new(HitPoint, HitPoint + Normal)
-							if Config.HitEffectEnabled then		
-								local attachment = service.New("Attachment", {
+							if Config.HitEffectEnabled and getDistanceFromCharacter(HitPoint) <= Config.HitEffectMaxVisibleDistance then		
+								local attachment = create("Attachment", {
 									CFrame = surfaceCF;
 									Parent = workspace.Terrain;
 								})
-								local sound = service.New("Sound", {
+								local sound = create("Sound", {
 									Parent = attachment;
-									SoundId = "rbxassetid://"..Config.HitSoundIds[math.random(1, #Config.HitSoundIds)];
+									SoundId = chooseRandAssetId(Config.HitSoundIds);
 									PlaybackSpeed = Config.HitSoundPitch;
 									Volume = Config.HitSoundVolume;
 								})
@@ -411,8 +461,8 @@ return function()
 								Debris:AddItem(attachment, 8)				
 							end
 
-							if Config.BulletHoleEnabled then
-								local hole = service.New("Part", {
+							if Config.BulletHoleEnabled and getDistanceFromCharacter(HitPoint) <= Config.BulletHoleMaxVisibleDistance then
+								local hole = create("Part", {
 									Name = "BulletHole";
 									Transparency = 1;
 									Anchored = true;
@@ -420,25 +470,27 @@ return function()
 									FormFactor = Enum.FormFactor.Custom;
 									Size = Vector3.new(1, 1, 0.2);
 									TopSurface = 0;
-									BottomSurface = 0
+									BottomSurface = 0;
 								})
-								service.New("BlockMesh", {
+								create("BlockMesh", {
 									Parent = hole;
 									Offset = Vector3.new(0, 0, 0);
 									Scale = Vector3.new(Config.BulletHoleSize, Config.BulletHoleSize, 0);
 								})
-								local decal = service.New("Decal", {
+								local decal = create("Decal", {
 									Parent = hole;
 									Face = Enum.NormalId.Front;
-									Texture = "rbxassetid://"..Config.BulletHoleTexture[math.random(1,#Config.BulletHoleTexture)];
+									Texture = chooseRandAssetId(Config.BulletHoleTextureIds);
 								})
-								if Config.PartColor then
+								if Config.BulletHoleSetToPartColor then
 									decal.Color3 = hitPart.Color
 								end
-								hole.Parent = workspace.CurrentCamera
-								hole.CFrame = surfaceCF * CFrame.Angles(0, 0, math.random(0, 360))
+								edit(hole, {
+									Parent = Camera;
+									CFrame = surfaceCF * CFrame.Angles(0, 0, math.random(0, 360));
+								})
 								if not hitPart.Anchored then
-									service.New("Weld", {
+									create("Weld", {
 										Parent = hole;
 										Part0 = hitPart;
 										Part1 = hole;
@@ -462,17 +514,17 @@ return function()
 						end)
 					end
 				elseif Config.ExplosiveEnabled then
-					if Config.ExplosionSoundEnabled then
-						service.New("Sound", {
+					if #Config.ExplosionSoundIds > 0 then
+						create("Sound", {
 							Parent = bullet;
-							SoundId = "rbxassetid://"..Config.ExplosionSoundIds[math.random(1,#Config.ExplosionSoundIds)];
+							SoundId = chooseRandAssetId(Config.ExplosionSoundIds);
 							PlaybackSpeed = Config.ExplosionSoundPitch;
 							Volume = Config.ExplosionSoundVolume;
 						}):Play()	
 					end
 
-					local explosion: Explosion = service.New("Explosion", {
-						Parent = workspace.CurrentCamera;
+					local explosion: Explosion = create("Explosion", {
+						Parent = Camera;
 						BlastRadius = Config.ExplosionRadius;
 						BlastPressure = 0;
 						Position = HitPoint;
@@ -482,9 +534,10 @@ return function()
 						explosion.Visible = false
 						local surfaceCF = CFrame.new(HitPoint, HitPoint + (Normal or Vector3.new(0, 0, 0)))
 
-						local attachment = service.New("Attachment")
-						attachment.CFrame = surfaceCF
-						attachment.Parent = workspace.Terrain
+						local attachment = create("Attachment", {
+							Parent = workspace.Terrain;
+							CFrame = surfaceCF;
+						})
 
 						task.spawn(function()
 							for _, v in pairs(Config.Folder_ExplosionEffect:GetChildren()) do
@@ -525,7 +578,9 @@ return function()
 				if plr ~= LocalPlayer then VisualizeBulletSet(plr, ...) end
 			end)
 			connectEvent(Remotes.VisualizeMuzzle.OnClientEvent, function(plr, ...)
-				if plr ~= LocalPlayer then VisualizeMuzzle(...) end
+				if plr ~= LocalPlayer and getDistanceFromCharacter(plr.Character.PrimaryPart.Position) <= Config.MuzzleEffectMaxVisibleDistance then
+					VisualizeMuzzle(...)
+				end
 			end)
 			connectEvent(Remotes.ChangeMagAndAmmo.OnClientEvent, function()
 				_mag, _ammo = Tool:GetAttribute("CurrentMag"), Tool:GetAttribute("CurrentAmmo")
@@ -596,11 +651,14 @@ return function()
 				pcall(function()
 					AmmoGui.Mag:WaitForChild("Fill"):AddShadow()
 				end)
-				if _ammoGuiHidden then AmmoGui:Hide(true) end
-				local ammo = AmmoGui.Mag:Clone()
-				ammo.Name = "Ammo"
-				ammo.Position = UDim2.new(0.5, 0, 0, 46)
-				ammo.Parent = AmmoGui
+				if _ammoGuiHidden then
+					AmmoGui:Hide(true)
+				end
+				edit(AmmoGui.Mag:Clone(), {
+					Parent = AmmoGui;
+					Name = "Ammo";
+					Position = UDim2.new(0.5, 0, 0, 46);
+				})
 				AmmoGui:Ready()
 				updateGui()
 				return AmmoGui
@@ -635,25 +693,22 @@ return function()
 			connectEvent(MarkerEvent.Event, function(isHeadshot)
 				if Config.HitmarkerEnabled then
 					pcall(function()
-						if isHeadshot then
-							Overlay.Crosshair.Hitmarker.ImageColor3 = Config.HitmarkerColorHS
-							Overlay.Crosshair.Hitmarker.ImageTransparency = 0
-							TweenService:Create(Overlay.Crosshair.Hitmarker, TweenInfo.new(Config.HitmarkerFadeTimeHS, Enum.EasingStyle.Linear, Enum.EasingDirection.Out), {ImageTransparency = 1}):Play()
-							local markersound = Overlay.Crosshair.MarkerSound:Clone()
-							markersound.PlaybackSpeed = Config.HitmarkerSoundPitchHS
-							markersound.Parent = LocalPlayer:FindFirstChildOfClass("PlayerGui")
-							markersound:Play()
-							Debris:AddItem(markersound, markersound.TimeLength)
-						else
-							Overlay.Crosshair.Hitmarker.ImageColor3 = Config.HitmarkerColor
-							Overlay.Crosshair.Hitmarker.ImageTransparency = 0
-							TweenService:Create(Overlay.Crosshair.Hitmarker, TweenInfo.new(Config.HitmarkerFadeTime, Enum.EasingStyle.Linear, Enum.EasingDirection.Out), {ImageTransparency = 1}):Play()
-							local markersound = Overlay.Crosshair.MarkerSound:Clone()
-							markersound.PlaybackSpeed = Config.HitmarkerSoundPitch
-							markersound.Parent = LocalPlayer:FindFirstChildOfClass("PlayerGui")
-							markersound:Play()
-							Debris:AddItem(markersound, markersound.TimeLength)
-						end
+						TweenService:Create(
+							edit(Overlay.Crosshair.Hitmarker, {
+								ImageColor3 = isHeadshot and Config.HitmarkerColorHS or Config.HitmarkerColor;
+								ImageTransparency = 0;
+							}),
+							TweenInfo.new(isHeadshot and Config.HitmarkerFadeTimeHS or Config.HitmarkerFadeTime, Enum.EasingStyle.Linear, Enum.EasingDirection.Out),
+							{ImageTransparency = 1}
+						):Play()
+
+						local markersound = Overlay.Crosshair.MarkerSound:Clone()
+						edit(markersound, {
+							Parent = LocalPlayer:FindFirstChildOfClass("PlayerGui");
+							PlaybackSpeed = isHeadshot and Config.HitmarkerSoundPitchHS or Config.HitmarkerSoundPitch;
+						}):Play()
+
+						Debris:AddItem(markersound, markersound.TimeLength)
 					end)
 				end
 			end)
@@ -663,10 +718,10 @@ return function()
 					local magSize, ammoSize = UDim2.fromScale(_mag/Config.AmmoPerMag, 1), UDim2.fromScale(_ammo/Config.MaxAmmo, 1) 
 					local magDisplay, ammoDisplay = AmmoGui:WaitForChild("Mag", 2), AmmoGui:WaitForChild("Ammo", 2)
 					if not magDisplay then return end
-					magDisplay.Fill:TweenSize(magSize, Enum.EasingDirection.Out, Enum.EasingStyle.Sine, 0.5, true)
-					ammoDisplay.Fill:TweenSize(ammoSize, Enum.EasingDirection.Out, Enum.EasingStyle.Sine, 0.5, true)
+					magDisplay.Fill:TweenSize(magSize, Enum.EasingDirection.Out, MAG_BAR_EASING_STYLE, MAG_BAR_TWEEN_DURATION, true)
+					ammoDisplay.Fill:TweenSize(ammoSize, Enum.EasingDirection.Out, AMMO_BAR_EASING_STYLE, AMMO_BAR_TWEEN_DURATION, true)
 
-					magDisplay.Status.Text = if reloading then "Reloading..." else _mag.."/"..Config.AmmoPerMag
+					magDisplay.Status.Text = if reloading then RELOADING_TEXT else _mag.."/"..Config.AmmoPerMag
 					ammoDisplay.Status.Text = _ammo.."/"..Config.MaxAmmo
 
 					ammoDisplay.Visible = Config.LimitedAmmo
@@ -701,7 +756,7 @@ return function()
 						IsChargedShot = false
 						VisualizeMuzzle(CurrentHandle)
 						Remotes.VisualizeMuzzle:FireServer(CurrentHandle)
-						for i = 1, if Config.BurstFireEnabled then Config.BulletPerBurst else 1 do
+						for _ = 1, if Config.BurstFireEnabled then Config.BulletPerBurst else 1 do
 							task.defer(function()
 								if Config.CameraRecoilEnabled then
 									local currentRecoil = Config.Recoil*(aimDown and 1 - Config.RecoilReduction or 1)
@@ -719,7 +774,7 @@ return function()
 								end
 							end)
 							if Config.BulletShellEnabled then
-								local chamber = service.New("Part", {
+								local chamber = create("Part", {
 									Name = "Chamber";
 									Size = Vector3.new(0.01, 0.01, 0.01);
 									Transparency = 1;
@@ -728,16 +783,18 @@ return function()
 									TopSurface = Enum.SurfaceType.SmoothNoOutlines;
 									BottomSurface = Enum.SurfaceType.SmoothNoOutlines;
 								})
-								service.New("Weld", {
+								create("Weld", {
 									Parent = chamber;
 									Part0 = CurrentHandle;
 									Part1 = chamber;
 									C0 = CFrame.new(Config.BulletShellOffset.X, Config.BulletShellOffset.Y, Config.BulletShellOffset.Z);
 								})
-								chamber.Position = (CurrentHandle.CFrame * CFrame.new(Config.BulletShellOffset.X, Config.BulletShellOffset.Y, Config.BulletShellOffset.Z)).p
-								chamber.Parent = workspace.CurrentCamera
+								edit(chamber, {
+									Parent = Camera;
+									Position = (CurrentHandle.CFrame * CFrame.new(Config.BulletShellOffset.X, Config.BulletShellOffset.Y, Config.BulletShellOffset.Z)).p;
+								})
 								task.defer(function()
-									local shell = service.New("Part", {
+									local shell = create("Part", {
 										Name = "Shell";
 										CFrame = chamber.CFrame * CFrame.fromEulerAnglesXYZ(-2.5, 1, 1);
 										Size = Config.BulletShellSize;
@@ -745,14 +802,14 @@ return function()
 										Velocity = chamber.CFrame.lookVector * 20 + Vector3.new(math.random(-10, 10), 20, math.random(-10, 10));
 										RotVelocity = Vector3.new(0, 200, 0);
 									})
-									service.New("SpecialMesh", {
+									create("SpecialMesh", {
 										Parent = shell;
 										Scale = Config.BulletShellScale;
-										MeshId = "rbxassetid://"..Config.BulletShellMeshId;
-										TextureId = "rbxassetid://"..Config.BulletShellTextureId;
+										MeshId = getAssetUri(Config.BulletShellMeshId);
+										TextureId = getAssetUri(Config.BulletShellTextureId);
 										MeshType = Enum.MeshType.FileMesh;
 									})
-									shell.Parent = workspace.CurrentCamera
+									shell.Parent = Camera
 									Debris:AddItem(shell, Config.BulletShellLifetime)
 								end)
 								Debris:AddItem(chamber, Config.BulletShellLifetime + 1)			
@@ -760,7 +817,7 @@ return function()
 							CrosshairModule.crossspring:accelerate(Config.CrossExpansion)
 							task.spawn(function()
 								local setData: {Vector3} = {}
-								for x = 1, Config.ShotgunEnabled and Config.BulletPerShot or 1 do
+								for i = 1, Config.ShotgunEnabled and Config.BulletsPerShot or 1 do
 									if not singleHold then playAnim("Fire") end
 									if not CurrentHandle.Fire.Playing or not CurrentHandle.Fire.Looped then
 										if Config.BoltBackAnimation then
@@ -772,7 +829,7 @@ return function()
 										inputPos.X + math.random(-Config.SpreadX * 2, Config.SpreadX * 2) * (aimDown and 1-Config.IronsightSpreadReduction and 1-Config.SniperSpreadReduction or 1),
 										inputPos.Y + math.random(-Config.SpreadY * 2, Config.SpreadY * 2) * (aimDown and 1-Config.IronsightSpreadReduction and 1-Config.SniperSpreadReduction or 1)
 									)
-									table.insert(setData, (select(2, workspace:FindPartOnRay(Ray.new(rayMag1.Origin, rayMag1.Direction * 5000), Character)) -CurrentHandle:FindFirstChild("GunMuzzle").WorldPosition).Unit)
+									setData[i] = (select(2, workspace:FindPartOnRay(Ray.new(rayMag1.Origin, rayMag1.Direction * 5000), Character)) - CurrentHandle:FindFirstChild("GunMuzzle").WorldPosition).Unit
 								end
 								VisualizeBulletSet(LocalPlayer, setData, CurrentHandle)
 								Remotes.VisualizeBulletSet:FireServer(setData, CurrentHandle)
@@ -780,7 +837,9 @@ return function()
 							_mag -= 1
 							Remotes.ChangeMagAndAmmo:FireServer(_mag, _ammo)
 							updateGui()
-							if Config.BurstFireEnabled then task.wait(Config.BurstRate) end
+							if Config.BurstFireEnabled then
+								task.wait(Config.BurstRate)
+							end
 							if _mag <= 0 then break end
 						end
 						local ind = table.find(handles, CurrentHandle)
@@ -1075,24 +1134,23 @@ return function()
 				local deltaTime = tick() - lastTick
 				lastTick = tick()
 
-				if scoping --[[and UserInputService.MouseEnabled]] and UserInputService.KeyboardEnabled then
-					Overlay.Scope.Size = UDim2.new(numLerp(Overlay.Scope.Size.X.Scale, 1.2, math.min(deltaTime * 5, 1)), 36, numLerp(Overlay.Scope.Size.Y.Scale, 1.2, math.min(deltaTime * 5, 1)), 36)
-					Overlay.Scope.Position = UDim2.new(0, Mouse.X - Overlay.Scope.AbsoluteSize.X / 2, 0, Mouse.Y - Overlay.Scope.AbsoluteSize.Y / 2)
-				elseif scoping and UserInputService.TouchEnabled --[[and not UserInputService.MouseEnabled]] and not UserInputService.KeyboardEnabled then
-					Overlay.Scope.Size = UDim2.new(numLerp(Overlay.Scope.Size.X.Scale, 1.2, math.min(deltaTime * 5, 1)), 36, numLerp(Overlay.Scope.Size.Y.Scale, 1.2, math.min(deltaTime * 5, 1)), 36)
-					Overlay.Scope.Position = UDim2.new(0, Overlay.Crosshair.AbsolutePosition.X - Overlay.Scope.AbsoluteSize.X / 2, 0, Overlay.Crosshair.AbsolutePosition.Y - Overlay.Scope.AbsoluteSize.Y / 2)
-				else
-					Overlay.Scope.Size = UDim2.new(0.6, 36, 0.6, 36)
-					Overlay.Scope.Position = UDim2.fromScale(0, 0)
-				end
+				edit(Overlay.Scope,
+					if scoping --[[and UserInputService.MouseEnabled]] and UserInputService.KeyboardEnabled then {
+						Size = UDim2.new(numLerp(Overlay.Scope.Size.X.Scale, 1.2, math.min(deltaTime * 5, 1)), 36, numLerp(Overlay.Scope.Size.Y.Scale, 1.2, math.min(deltaTime * 5, 1)), 36);
+						Position = UDim2.new(0, Mouse.X - Overlay.Scope.AbsoluteSize.X / 2, 0, Mouse.Y - Overlay.Scope.AbsoluteSize.Y / 2);
+					} elseif scoping and UserInputService.TouchEnabled --[[and not UserInputService.MouseEnabled]] and not UserInputService.KeyboardEnabled then {
+							Size = UDim2.new(numLerp(Overlay.Scope.Size.X.Scale, 1.2, math.min(deltaTime * 5, 1)), 36, numLerp(Overlay.Scope.Size.Y.Scale, 1.2, math.min(deltaTime * 5, 1)), 36);
+							Position = UDim2.new(0, Overlay.Crosshair.AbsolutePosition.X - Overlay.Scope.AbsoluteSize.X / 2, 0, Overlay.Crosshair.AbsolutePosition.Y - Overlay.Scope.AbsoluteSize.Y / 2);
+						} else {
+							Size = UDim2.new(0.6, 36, 0.6, 36);
+							Position = UDim2.fromScale(0, 0);
+						})
 
 				Overlay.Scope.Visible = scoping
 
-				if UserInputService.TouchEnabled --[[and not UserInputService.MouseEnabled]] and not UserInputService.KeyboardEnabled and (Character.Head.Position - Camera.CoordinateFrame.p).magnitude <= 2 then
-					Overlay.Crosshair.Position = UDim2.new(0.5, -1, 0.5, -19)
-				else
-					Overlay.Crosshair.Position = UDim2.fromOffset(Mouse.X, Mouse.Y)
-				end
+				Overlay.Crosshair.Position =
+					if UserInputService.TouchEnabled --[[and not UserInputService.MouseEnabled]] and not UserInputService.KeyboardEnabled and (Character.Head.Position - Camera.CoordinateFrame.p).Magnitude <= 2 then UDim2.new(0.5, -1, 0.5, -19)
+					else UDim2.fromOffset(Mouse.X, Mouse.Y)
 			end)
 
 			Tool.AncestryChanged:Connect(function(_, parent)
@@ -1102,6 +1160,10 @@ return function()
 					end
 				end
 			end)
+
+			if Config._Execute then
+				Config._Execute(Tool, service, client)
+			end
 		end
 
 		Debug("Loaded")
