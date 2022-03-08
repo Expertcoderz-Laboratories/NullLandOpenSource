@@ -39,13 +39,17 @@ return function()
 		do
 			local function update()
 				LocalCharacter = LocalPlayer.Character
-				LocalHumanoid = LocalCharacter and LocalCharacter:FindFirstChildOfClass("Humanoid")
-				LocalHumanoid.Destroying:Connect(update)
-				LocalCharacter.ChildAdded:Connect(function(child)
-					if child:IsA("Humanoid") then
-						update()
-					end
-				end)
+				if LocalCharacter then
+					LocalCharacter.ChildAdded:Connect(function(child)
+						if child:IsA("Humanoid") and not LocalHumanoid then
+							LocalHumanoid = child
+						end
+					end)
+					LocalPlayer.ChildRemoved:Connect(function()
+						LocalHumanoid = LocalCharacter:FindFirstChildOfClass("Humanoid")
+					end)
+					LocalHumanoid = LocalCharacter:FindFirstChildOfClass("Humanoid")
+				end
 			end
 			LocalPlayer.CharacterAdded:Connect(update)
 			LocalPlayer.CharacterRemoving:Connect(update)
@@ -87,17 +91,16 @@ return function()
 			return getAssetUri(list[math.random(1, #list)])
 		end
 		local function getDistanceFromCharacter(point: Vector3): number
-			if not LocalPlayer.Character or not LocalPlayer.Character.PrimaryPart then
+			if not LocalCharacter or not LocalCharacter.PrimaryPart then
 				return 0
 			end
-			return (point - LocalPlayer.Character.PrimaryPart.Position).Magnitude
+			return (point - LocalCharacter.PrimaryPart.Position).Magnitude
 		end
 
 		if FIRST_PERSON_ARMS_VISIBLE then
 			service.RunService.RenderStepped:Connect(function()
-				local char = LocalPlayer.Character
-				if not char then return end
-				for _, v in pairs(char:GetChildren()) do
+				if not LocalCharacter then return end
+				for _, v in pairs(LocalCharacter:GetChildren()) do
 					if string.match(v.Name, "Arm") and not string.match(v.Name, "Ragdoll") then
 						v.LocalTransparencyModifier = 0
 					end
@@ -314,7 +317,9 @@ return function()
 
 			local function InflictTarget(hitPart: BasePart)
 				local damage = Config.BaseDamage * if hitPart.Name == "Head" then Config.HeadshotDamageMultiplier else 1
-				if damageBillboardTemplate and damage ~= 0 and not Config.NoDamageBillboards then
+				local hitPlr = Players:GetPlayerFromCharacter(hitPart.Parent)
+				
+				if damageBillboardTemplate and damage ~= 0 and not Config.NoDamageBillboards and (not hitPlr or ToolOwner == hitPlr or not workspace:GetAttribute("TeamkillDisabled") or not hitPlr.Team or ToolOwner.Team ~= hitPlr.Team) then
 					task.spawn(function()
 						local gui = damageBillboardTemplate:Clone()
 						gui.Amount.Text = if damage > 0 then "-"..damage else "+"..damage
@@ -359,13 +364,14 @@ return function()
 
 				local targetHum = hitPart and (hitPart.Parent:FindFirstChildOfClass("Humanoid") or hitPart.Parent.Parent:FindFirstChildOfClass("Humanoid"))
 				local targetChar = targetHum and targetHum.Parent
-				hitPart = targetChar and (if hitPart.Name == "Head" and hitPart.Parent == targetChar then hitPart else targetChar:FindFirstChild("HumanoidRootPart"))
-
+				local hitCore = targetChar and (if hitPart.Name == "Head" and hitPart.Parent == targetChar then hitPart else targetChar:FindFirstChild("HumanoidRootPart"))
+				
+				local surfaceCF = CFrame.new(HitPoint, HitPoint + (Normal or Vector3.new(0, 0, 0)))
+				
 				if not Config.ExplosiveEnabled and hitPart and (hitPart.Transparency < 0.9 or hitPart.Name == "HumanoidRootPart") then
-					if hitPart and targetHum.Health > 0 then
+					if hitCore and targetHum.Health > 0 then
 						--// Hit something alive
 						task.spawn(function()
-							local surfaceCF = CFrame.new(HitPoint, HitPoint + Normal)
 							if Config.BloodEnabled and getDistanceFromCharacter(HitPoint) <= Config.BloodEffectMaxVisibleDistance then
 								local attachment = create("Attachment", {
 									CFrame = surfaceCF;
@@ -446,12 +452,11 @@ return function()
 								end)
 							end
 						end)
-						InflictTarget(hitPart)
+						InflictTarget(hitCore)
 					else
 						--// Hit something non-alive
 						task.spawn(function()
-							local surfaceCF = CFrame.new(HitPoint, HitPoint + Normal)
-							if Config.HitEffectEnabled and getDistanceFromCharacter(HitPoint) <= Config.HitEffectMaxVisibleDistance then		
+							if Config.HitEffectEnabled and getDistanceFromCharacter(HitPoint) <= Config.HitEffectMaxVisibleDistance then
 								local attachment = create("Attachment", {
 									CFrame = surfaceCF;
 									Parent = workspace.Terrain;
@@ -556,7 +561,6 @@ return function()
 
 					if Config.CustomExplosion then
 						explosion.Visible = false
-						local surfaceCF = CFrame.new(HitPoint, HitPoint + (Normal or Vector3.new(0, 0, 0)))
 
 						local attachment = create("Attachment", {
 							Parent = workspace.Terrain;
