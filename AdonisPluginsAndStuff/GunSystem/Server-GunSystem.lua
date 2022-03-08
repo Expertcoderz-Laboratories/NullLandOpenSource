@@ -3,17 +3,18 @@
 	Description: The serverside component of the Adonis Gun System.
 	Author: Expertcoderz
 	Release Date: 2022-02-11 (project started in December 2021; originated from Aug/Sep 2021)
-	Last Updated: 2022-03-07
+	Last Updated: 2022-03-08
 --]]
 
 server, service = nil, nil
 
 return function()
-	local Players: Players = service.Players
-
+	local startTime = os.clock()
 	local function Debug(...)
 		warn("[GunServer]", ...)
 	end
+	
+	local Players: Players = service.Players
 
 	local function ExploitDetected(plr: Player, action: string, desc: string, ...: any)
 		return server.Anti.Detected(plr, action, "[Gun System] "..string.format(desc, ...))
@@ -154,6 +155,7 @@ return function()
 						table.insert(self.handles, v)
 					end
 				end
+				self.CurrentHandle = self.handles[1]
 
 				self.ConfigModule = LoadConfig(tool.Name) :: ModuleScript
 				self.config = configCaches[tool.Name] :: {[string]:any}
@@ -269,25 +271,31 @@ return function()
 							sound:Play()
 						end
 					end,
-					VisualizeBulletSet = function(plr: Player, fireDirs: {Vector3}, handle: BasePart)
-						if not type(fireDirs) == "table" and typeof(handle) == "Instance" then
-							ExploitDetected(plr, "kill", "Invalid remote data for VisualizeBulletSet (fireDirs: %s, handle: %s)", tostring(fireDirs), tostring(handle))
+					VisualizeBulletSet = function(plr: Player, fireDirs: {Vector3})
+						if not type(fireDirs) == "table" then
+							ExploitDetected(plr, "kill", "Invalid remote data for VisualizeBulletSet (fireDirs: %s)", tostring(fireDirs))
 							return
 						end
 						if #fireDirs ~= config.BulletsPerShot and #fireDirs ~= 1 then
 							ExploitDetected(plr, "kick", "Attempt to fire bullet set of incorrect size (expected %d, got %d)", config.BulletsPerShot, #fireDirs)
 							return
 						end
+
 						for i, handle in pairs(self.handles) do
-							if handle == handle then
+							if handle == self.CurrentHandle then
 								self["fireSounds"..i][math.random(1, #self["fireSounds"..i])]:Play()
 								break
 							end
 						end
-						self.RemotesFolder.VisualizeBulletSet:FireAllClients(plr, fireDirs, handle)
+
+						self.RemotesFolder.VisualizeBulletSet:FireAllClients(plr, fireDirs, self.CurrentHandle)
+
 						if server.Functions.AddToGlobalStat then
 							server.Functions.AddToGlobalStat("Shots Fired", #fireDirs)
 						end
+
+						local ind = table.find(self.handles, self.CurrentHandle)
+						self.CurrentHandle = if ind == #self.handles then self.handles[1] else self.handles[ind + 1]
 					end,
 					VisualizeMuzzle = function(plr: Player, ...)
 						self.RemotesFolder.VisualizeMuzzle:FireAllClients(plr, ...)
@@ -297,7 +305,7 @@ return function()
 						local targetHum = targetChar and targetChar:FindFirstChildOfClass("Humanoid")
 						local targetPlr = targetHum and Players:GetPlayerFromCharacter(targetChar)
 
-						if targetHum and targetHum.Health ~= 0 and (not targetPlr or not workspace:GetAttribute("_TeamkillDisabled") or not targetPlr.Team or plr.Team ~= targetPlr.Team) then
+						if targetHum and targetHum.Health ~= 0 and (not targetPlr or not workspace:GetAttribute("TeamkillDisabled") or not targetPlr.Team or plr.Team ~= targetPlr.Team) then
 							server.Functions.ApplyDeathTag(targetHum, plr.DisplayName.." using "..tool.Name)
 
 							local damageAmount = config.BaseDamage * if targetHitPart.Name == "Head" then config.HeadshotDamageMultiplier else 1
@@ -470,10 +478,11 @@ return function()
 			Description = "Set whether players can harm others on their team with weapons";
 			AdminLevel = "Moderators";
 			Function = function(plr: Player, args: {string})
-				workspace:SetAttribute("_TeamkillDisabled", if args[1] and args[1]:lower() == "on" then false
+				workspace:SetAttribute("TeamkillDisabled", if args[1] and args[1]:lower() == "on" then false
 					elseif args[1] and args[1]:lower() == "off" then true
-					else not workspace:GetAttribute("_TeamkillDisabled"))
-				server.Functions.Hint(string.format("Teamkill is now %s.", workspace:GetAttribute("_TeamkillDisabled") and "disabled" or "enabled"), Players:GetPlayers())
+					else not workspace:GetAttribute("TeamkillDisabled"))
+				
+				server.Functions.Hint(string.format("Teamkill is now %s.", workspace:GetAttribute("TeamkillDisabled") and "disabled" or "enabled"), Players:GetPlayers())
 			end
 		}
 
@@ -505,7 +514,7 @@ return function()
 			end
 		}
 
-		Debug("Installation complete")
+		Debug("Installation complete;", string.format("%.4fs", os.clock() - startTime))
 	end, function(err)
 		Debug("Installation error:", err)
 	end)
