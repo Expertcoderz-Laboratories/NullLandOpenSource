@@ -3,7 +3,7 @@
 	Description: The clientside component of the Adonis Gun System; handles most of the visuals & controls.
 	Author: Expertcoderz
 	Release Date: 2022-02-11 (project started in December 2021; originated from Aug/Sep 2021)
-	Last Updated: 2022-03-10
+	Last Updated: 2022-03-11
 --]]
 
 client, service = nil, nil
@@ -601,10 +601,10 @@ return function()
 			end)
 
 			local Overlay = nil
-			
+
 			local function updateOwnership()
 				Owner = Tool.Parent and (Players:GetPlayerFromCharacter(Tool.Parent) or Tool.Parent.Parent)
-				
+
 				if not Tool.Parent or not Owner then
 					for conn in pairs(connections) do
 						conn:Disconnect()
@@ -759,7 +759,6 @@ return function()
 							anim:Stop()
 						end
 					end
-
 					local function playSound(name: string)
 						local sound = CurrentHandle:FindFirstChild(name)
 						if sound then
@@ -992,72 +991,6 @@ return function()
 						aimDown = false
 					end
 
-					connectOwnerEvent(Overlay.MobileButtons.AimButton.MouseButton1Click, function()
-						if not reloading and not holdDown  and not aimDown and equipped and config.IronsightEnabled and (LocalCharacter.Head.Position - Camera.CoordinateFrame.p).Magnitude <= 2 then
-							TweenService:Create(Camera, TweenInfo.new(config.TweenLength, config.EasingStyle, config.EasingDirection), {FieldOfView = config.IronsightFieldOfView}):Play()
-							CrosshairModule:setcrossscale(config.IronsightCrossScale)
-
-							--Scoping = false
-							LocalPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
-							UserInputService.MouseDeltaSensitivity = _initialSensitivity * config.IronsightMouseSensitivity
-							aimDown = true
-							playAnim("Aiming")
-						elseif not reloading and not holdDown and not aimDown and equipped and config.SniperEnabled and (LocalCharacter.Head.Position - Camera.CoordinateFrame.p).Magnitude <= 2 then
-							TweenService:Create(Camera, TweenInfo.new(config.TweenLength, config.EasingStyle, config.EasingDirection), {FieldOfView = config.SniperFieldOfView}):Play()
-							CrosshairModule:setcrossscale(config.SniperCrossScale)
-
-							local zoomsound = Overlay.Scope.ZoomSound:Clone()
-							zoomsound.Parent = LocalPlayer:FindFirstChildOfClass("PlayerGui")
-							zoomsound:Play()
-
-							scoping = true
-							LocalPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
-							UserInputService.MouseDeltaSensitivity = _initialSensitivity * config.SniperMouseSensitivity
-							aimDown = true
-							playAnim("Aiming")
-
-							Debris:AddItem(zoomsound, 5)
-						else
-							stopAim()
-							stopAnim("Aiming")
-						end
-					end)
-
-					connectOwnerEvent(Overlay.MobileButtons.HoldDownButton.MouseButton1Click, function()
-						if not reloading and not holdDown  and config.HoldDownEnabled then
-							holdDown = true
-							stopAnim("Idle")
-							playAnim("HoldDown")
-							if aimDown then
-								stopAim()
-							end
-						else
-							holdDown = false
-							playAnim("Idle")
-							stopAnim("HoldDown")
-						end
-					end)
-
-					connectOwnerEvent(Overlay.MobileButtons.ReloadButton.MouseButton1Click, Reload)
-
-					connectOwnerEvent(Overlay.MobileButtons.FireButton.MouseButton1Down, function()
-						Fire(Overlay.Crosshair.AbsolutePosition)
-					end)
-					connectOwnerEvent(Overlay.MobileButtons.FireButton.MouseButton1Up, function()
-						down = false
-					end)
-
-					connectOwnerEvent(Mouse.Button1Down, function()
-						if not UserInputService.TouchEnabled then
-							Fire(Mouse)
-						end
-					end)
-					connectOwnerEvent(Mouse.Button1Up, function()
-						if not UserInputService.TouchEnabled then
-							down = false
-						end
-					end)
-
 					local flashlightDebounce = false
 					function ToggleFlashlight()
 						flashlightDebounce = true
@@ -1068,11 +1001,142 @@ return function()
 					end
 
 					local toolEquippedConnections = {}
+					local function disconnectAll()
+						for conn in pairs(toolEquippedConnections) do
+							conn:Disconnect()
+							toolEquippedConnections[conn] = nil
+						end
+					end
+					local toolEquipBindings = {
+						[Overlay.MobileButtons.AimButton.MouseButton1Click] = function()
+							if not reloading and not holdDown  and not aimDown and equipped and config.IronsightEnabled and (LocalCharacter.Head.Position - Camera.CoordinateFrame.p).Magnitude <= 2 then
+								TweenService:Create(Camera, TweenInfo.new(config.TweenLength, config.EasingStyle, config.EasingDirection), {FieldOfView = config.IronsightFieldOfView}):Play()
+								CrosshairModule:setcrossscale(config.IronsightCrossScale)
+
+								--Scoping = false
+								LocalPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
+								UserInputService.MouseDeltaSensitivity = _initialSensitivity * config.IronsightMouseSensitivity
+								aimDown = true
+								playAnim("Aiming")
+							elseif not reloading and not holdDown and not aimDown and equipped and config.SniperEnabled and (LocalCharacter.Head.Position - Camera.CoordinateFrame.p).Magnitude <= 2 then
+								TweenService:Create(Camera, TweenInfo.new(config.TweenLength, config.EasingStyle, config.EasingDirection), {FieldOfView = config.SniperFieldOfView}):Play()
+								CrosshairModule:setcrossscale(config.SniperCrossScale)
+
+								local zoomsound = Overlay.Scope.ZoomSound:Clone()
+								zoomsound.Parent = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+								zoomsound:Play()
+
+								scoping = true
+								LocalPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
+								UserInputService.MouseDeltaSensitivity = _initialSensitivity * config.SniperMouseSensitivity
+								aimDown = true
+								playAnim("Aiming")
+
+								Debris:AddItem(zoomsound, 5)
+							else
+								stopAim()
+								stopAnim("Aiming")
+							end
+						end,
+						[Overlay.MobileButtons.HoldDownButton.MouseButton1Click] = function()
+							if not reloading and not holdDown  and config.HoldDownEnabled then
+								holdDown = true
+								stopAnim("Idle")
+								playAnim("HoldDown")
+								if aimDown then
+									stopAim()
+								end
+							else
+								holdDown = false
+								playAnim("Idle")
+								stopAnim("HoldDown")
+							end
+						end,
+						[Overlay.MobileButtons.ReloadButton.MouseButton1Click] = Reload,
+						[Overlay.MobileButtons.FireButton.MouseButton1Down] = function()
+							Fire(Overlay.Crosshair.AbsolutePosition)
+						end,
+						[Overlay.MobileButtons.FireButton.MouseButton1Up] = function()
+							down = false
+						end,
+
+						[UserInputService.InputBegan] = function(inputObj, processed)
+							if processed or not equipped or inputObj.UserInputType ~= Enum.UserInputType.Keyboard then return end
+
+							if inputObj.KeyCode == config.Key_Reload then
+								Reload()
+							elseif inputObj.KeyCode == config.Key_HoldDown then
+								if not reloading and not holdDown and config.HoldDownEnabled then
+									holdDown = true
+									stopAnim("Idle")
+									playAnim("HoldDown")
+									if aimDown then 
+										stopAim()
+									end
+								else
+									holdDown = false
+									playAnim("Idle")
+									stopAnim("HoldDown")
+								end
+							elseif inputObj.KeyCode == config.Key_Flashlight and Tool:GetAttribute("FlashlightEnabled") and not flashlightDebounce then
+								ToggleFlashlight()
+							elseif inputObj.KeyCode == config.Key_SingleHold and (config.SingleHoldEnabled or LocalPlayer:GetAttribute("CanSingleHoldGuns")) then
+								if singleHold then
+									singleHold = false
+									playAnim("Idle")
+								else
+									singleHold = true
+									stopAnim("Idle")
+								end
+							end
+						end,
+						[Mouse.Button1Down] = function()
+							if not UserInputService.TouchEnabled then
+								Fire(Mouse)
+							end
+						end,
+						[Mouse.Button1Up] = function()
+							if not UserInputService.TouchEnabled then
+								down = false
+							end
+						end,
+						[Mouse.Button2Down] = function()
+							if reloading or holdDown  or aimDown or not equipped or (LocalCharacter.Head.Position - Camera.CoordinateFrame.p).Magnitude > 2 then return end
+							if config.IronsightEnabled then
+								TweenService:Create(Camera, TweenInfo.new(config.TweenLength, config.EasingStyle, config.EasingDirection), {FieldOfView = config.IronsightFieldOfView}):Play()
+								CrosshairModule:setcrossscale(config.IronsightCrossScale)
+
+								LocalPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
+								UserInputService.MouseDeltaSensitivity = _initialSensitivity * config.IronsightMouseSensitivity
+								aimDown = true
+								playAnim("Aiming")
+							elseif config.SniperEnabled then
+								TweenService:Create(Camera, TweenInfo.new(config.TweenLength, config.EasingStyle, config.EasingDirection), {FieldOfView = config.SniperFieldOfView}):Play()
+								CrosshairModule:setcrossscale(config.SniperCrossScale)
+
+								local zoomsound = Overlay.Scope.ZoomSound:Clone()
+								zoomsound.Parent = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+								zoomsound:Play()
+
+								scoping = true
+								LocalPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
+								UserInputService.MouseDeltaSensitivity = _initialSensitivity * config.SniperMouseSensitivity
+								aimDown = true
+								playAnim("Aiming")
+
+								Debris:AddItem(zoomsound, zoomsound.TimeLength)
+							end
+						end,
+						[Mouse.Button2Up] = function()
+							if aimDown then
+								stopAim()
+								stopAnim("Aiming")
+							end
+						end
+					}
 
 					connectOwnerEvent(Tool.Equipped, function()
-						for _, v in pairs(toolEquippedConnections) do
-							if v then v:Disconnect() end
-						end
+						disconnectAll()
 
 						UserInputService.MouseIconEnabled = false
 						Overlay.Parent = LocalPlayer:FindFirstChildOfClass("PlayerGui")
@@ -1090,71 +1154,9 @@ return function()
 						playAnim("Equip")
 						playAnim("Idle")
 
-						toolEquippedConnections = {
-							connectOwnerEvent(UserInputService.InputBegan, function(inputObj, processed)
-								if processed or not equipped or inputObj.UserInputType ~= Enum.UserInputType.Keyboard then return end
-
-								if inputObj.KeyCode == config.Key_Reload then
-									Reload()
-								elseif inputObj.KeyCode == config.Key_HoldDown then
-									if not reloading and not holdDown and config.HoldDownEnabled then
-										holdDown = true
-										stopAnim("Idle")
-										playAnim("HoldDown")
-										if aimDown then 
-											stopAim()
-										end
-									else
-										holdDown = false
-										playAnim("Idle")
-										stopAnim("HoldDown")
-									end
-								elseif inputObj.KeyCode == config.Key_Flashlight and Tool:GetAttribute("FlashlightEnabled") and not flashlightDebounce then
-									ToggleFlashlight()
-								elseif inputObj.KeyCode == config.Key_SingleHold and (config.SingleHoldEnabled or LocalPlayer:GetAttribute("CanSingleHoldGuns")) then
-									if singleHold then
-										singleHold = false
-										playAnim("Idle")
-									else
-										singleHold = true
-										stopAnim("Idle")
-									end
-								end
-							end),
-							connectOwnerEvent(Mouse.Button2Down, function()
-								if reloading or holdDown  or aimDown or not equipped or (LocalCharacter.Head.Position - Camera.CoordinateFrame.p).Magnitude > 2 then return end
-								if config.IronsightEnabled then
-									TweenService:Create(Camera, TweenInfo.new(config.TweenLength, config.EasingStyle, config.EasingDirection), {FieldOfView = config.IronsightFieldOfView}):Play()
-									CrosshairModule:setcrossscale(config.IronsightCrossScale)
-
-									LocalPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
-									UserInputService.MouseDeltaSensitivity = _initialSensitivity * config.IronsightMouseSensitivity
-									aimDown = true
-									playAnim("Aiming")
-								elseif config.SniperEnabled then
-									TweenService:Create(Camera, TweenInfo.new(config.TweenLength, config.EasingStyle, config.EasingDirection), {FieldOfView = config.SniperFieldOfView}):Play()
-									CrosshairModule:setcrossscale(config.SniperCrossScale)
-
-									local zoomsound = Overlay.Scope.ZoomSound:Clone()
-									zoomsound.Parent = LocalPlayer:FindFirstChildOfClass("PlayerGui")
-									zoomsound:Play()
-
-									scoping = true
-									LocalPlayer.CameraMode = Enum.CameraMode.LockFirstPerson
-									UserInputService.MouseDeltaSensitivity = _initialSensitivity * config.SniperMouseSensitivity
-									aimDown = true
-									playAnim("Aiming")
-
-									Debris:AddItem(zoomsound, zoomsound.TimeLength)
-								end
-							end),
-							connectOwnerEvent(Mouse.Button2Up, function()
-								if aimDown then
-									stopAim()
-									stopAnim("Aiming")
-								end
-							end)
-						}
+						for signal, callback in pairs(toolEquipBindings) do
+							toolEquippedConnections[connectOwnerEvent(signal, callback)] = true
+						end
 					end)
 
 					connectOwnerEvent(Tool.Unequipped, function()
@@ -1180,9 +1182,7 @@ return function()
 						if aimDown then
 							stopAim()
 						end
-						for _, v in pairs(toolEquippedConnections) do
-							if v then v:Disconnect() end
-						end
+						disconnectAll()
 					end)
 
 					connectOwnerEvent(LocalHumanoid.Died, function()
