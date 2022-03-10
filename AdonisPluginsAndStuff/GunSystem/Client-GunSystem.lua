@@ -328,15 +328,15 @@ return function()
 					caster:FireWithBlacklist(firePointObject.WorldPosition, fireDirection * config.Range, config.BulletSpeed, {service.UnWrap(firingHandle), service.UnWrap(Tool.Parent), service.UnWrap(Camera)}, service.UnWrap(bullet))
 				end
 			end
-			
+
 			caster.Gravity = config.DropGravity
 			caster.ExtraForce = config.WindOffset
 
-			caster.LengthChanged:Connect(function(_, segmentOrigin, segmentDirection, length, bullet)
+			connectEvent(caster.LengthChanged, function(_, segmentOrigin, segmentDirection, length, bullet)
 				bullet.CFrame = CFrame.new(segmentOrigin, segmentOrigin + segmentDirection) * CFrame.new(0, 0, -(length - bullet.Size.Z / 2))
 			end)
 
-			caster.RayHit:Connect(function(hitPart: BasePart, HitPoint: Vector3, Normal: Vector3, Material: Enum.Material, bullet: BasePart)
+			connectEvent(caster.RayHit, function(hitPart: BasePart, HitPoint: Vector3, Normal: Vector3, Material: Enum.Material, bullet: BasePart)
 				Debris:AddItem(bullet, 4)
 				edit(bullet, {
 					Transparency = 1;
@@ -572,7 +572,7 @@ return function()
 								end)
 							end
 						end)
-						
+
 						Debris:AddItem(attachment, 10)
 					end	
 
@@ -601,8 +601,10 @@ return function()
 			end)
 
 			local Overlay = nil
+			
 			local function updateOwnership()
 				Owner = Tool.Parent and (Players:GetPlayerFromCharacter(Tool.Parent) or Tool.Parent.Parent)
+				
 				if not Tool.Parent or not Owner then
 					for conn in pairs(connections) do
 						conn:Disconnect()
@@ -1228,7 +1230,7 @@ return function()
 				end
 			end
 
-			Tool.AncestryChanged:Connect(updateOwnership)
+			connectEvent(Tool.AncestryChanged, updateOwnership)
 			updateOwnership()
 
 			if config._Execute then
