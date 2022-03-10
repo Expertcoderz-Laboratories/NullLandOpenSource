@@ -3,7 +3,7 @@
 	Description: The clientside component of the Adonis Gun System; handles most of the visuals & controls.
 	Author: Expertcoderz
 	Release Date: 2022-02-11 (project started in December 2021; originated from Aug/Sep 2021)
-	Last Updated: 2022-03-09
+	Last Updated: 2022-03-10
 --]]
 
 client, service = nil, nil
@@ -156,195 +156,187 @@ return function()
 			return config
 		end
 
-		local ClientGun = {}
-		ClientGun.__index = ClientGun
-
-		function ClientGun:connectEvent(event: RBXScriptSignal, callback: (any)->()): RBXScriptConnection?
-			if not event or not callback then return end
-			local conn = event:Connect(callback)
-			if conn then
-				self.connections[conn] = true
-			end
-			return conn
-		end
-		function ClientGun:connectOwnerEvent(...)
-			local connection = self:connectEvent(...)
-			self.ownerConnections[connection] = true
-			return connection
-		end
-
-		function ClientGun:inflictTarget(hitPart: BasePart)
-			local damage = self.config.BaseDamage * if hitPart.Name == "Head" then self.config.HeadshotDamageMultiplier else 1
-			local hitPlr = Players:GetPlayerFromCharacter(hitPart.Parent)
-
-			if damageBillboardTemplate and damage ~= 0 and not self.config.NoDamageBillboards and (not hitPlr or self.Owner == hitPlr or not workspace:GetAttribute("TeamkillDisabled") or not hitPlr.Team or self.Owner.Team ~= hitPlr.Team) then
-				task.spawn(function()
-					local gui = damageBillboardTemplate:Clone()
-					gui.Amount.Text = if damage > 0 then "-"..damage else "+"..damage
-					gui.Amount.TextColor3 = if damage > 0 then DAMAGE_BILLBOARD_HARM_COLOR else DAMAGE_BILLBOARD_HEAL_COLOR
-					gui.Amount.TextSize = math.random(16, 20)
-
-					gui.Parent = Camera
-					gui.Adornee = hitPart
-
-					Debris:AddItem(gui, DAMAGE_BILLBOARD_DURATION)
-
-					TweenService:Create(gui, TweenInfo.new(DAMAGE_BILLBOARD_DURATION, Enum.EasingStyle.Sine), {StudsOffset = Vector3.new(math.random(1, 6), math.random(5, 8), math.random(1, 6))}):Play()
-					TweenService:Create(gui.Amount, TweenInfo.new(DAMAGE_BILLBOARD_DURATION, Enum.EasingStyle.Sine), {TextTransparency = 1, TextStrokeTransparency = 1}):Play()
-				end)
-			end
-
-			if self.isOwnedByLocalPlayer then
-				self.Remotes.InflictTarget:FireServer(hitPart)
-				self.MarkerEvent:Fire(hitPart.Name == "Head" and self.config.HeadshotDamageMultiplier > 1)
-			end
-		end
-
-		function ClientGun:visualizeMuzzle(firingHandle: BasePart)
-			local config = self.config
-
-			if config.MuzzleFlashEnabled then
-				task.spawn(function()
-					for _, v in pairs(firingHandle.GunMuzzle:GetChildren()) do
-						if v:GetAttribute("_IsMuzzleEffect") then
-							v:Emit(v:GetAttribute("EmitCount") or 1)
-						end
-					end				
-				end)
-			end
-			if config.MuzzleLightEnabled then
-				Debris:AddItem(create("PointLight", {
-					Parent = firingHandle.GunMuzzle;
-					Brightness = config.MuzzleLightBrightness;
-					Color = config.MuzzleLightColor;
-					Enabled = true;
-					Range = config.MuzzleLightRange;
-					Shadows = config.MuzzleLightShadows;
-				}), config.MuzzleLightLifetime)
-			end
-		end
-
-		function ClientGun:visualizeBulletSet(plr: Player, setData: {Vector3}, firingHandle: BasePart)
-			local config = self.config
-
-			for _, fireDirection in pairs(setData) do
-				local firePointObject: Attachment = firingHandle.GunMuzzle
-
-				local bullet: Part = create("Part", {
-					Name = "Bullet";
-					Material = config.BulletMaterial;
-					Color = config.BulletColor;
-					CanCollide = false;
-					Anchored = true;
-					Size = config.BulletSize;
-					Transparency = config.BulletTransparency;
-					Shape = config.BulletShape;
-				})
-				if config.BulletMeshEnabled then
-					create("SpecialMesh", {
-						Parent = bullet;
-						Scale = config.BulletMeshScale;
-						MeshId = getAssetUri(config.BulletMeshId);
-						TextureId = getAssetUri(config.BulletTextureId);
-						MeshType = Enum.MeshType.FileMesh
-					})
-				end
-
-				edit(bullet, {
-					Parent = Camera;
-					CFrame = CFrame.new(firePointObject.WorldPosition, firePointObject.WorldPosition + fireDirection);
-				})
-
-				if config.WhizSoundEnabled and (#setData == 1 or math.random(0, 1) == 1) then
-					create("Sound", {
-						Parent = bullet;
-						Name = "WhizSound";
-						Looped = true;
-						RollOffMaxDistance = 50;
-						RollOffMinDistance = 10;
-						SoundId = chooseRandAssetId(config.WhizSoundIds);
-						Volume = config.WhizSoundVolume;
-						PlaybackSpeed = config.WhizSoundPitch;
-					}):Play()
-				end
-
-				if config.BulletLightEnabled then
-					create("PointLight", {
-						Parent = bullet;
-						Name = "BulletLight";
-						Brightness = config.BulletLightBrightness;
-						Color = config.BulletLightColor;
-						Enabled = true;
-						Range = config.BulletLightRange;
-						Shadows = config.BulletLightShadows;
-					})
-				end
-
-				if config.BulletTracerEnabled then
-					for _, v in pairs(config.Folder_TracerEffect:GetChildren()) do
-						if v:IsA("Trail") then
-							edit(v:Clone(), {
-								Parent = bullet;
-								Attachment0 = create("Attachment", {
-									Parent = bullet;
-									Name = "Attachment0";
-									Position = config.BulletTracerOffset0;
-								});
-								Attachment1 = create("Attachment", {
-									Parent = bullet;
-									Name = "Attachment1";
-									Position = config.BulletTracerOffset1;
-								});
-							})
-						end
-					end
-				end
-
-				if config.BulletParticleEnabled then
-					for _, v in pairs(config.Folder_ParticleEffect:GetChildren()) do
-						if v:IsA("ParticleEmitter") then
-							edit(v:Clone(), {
-								Parent = bullet;
-								Enabled = true;
-							})
-						end
-					end
-				end	
-
-				self.caster:FireWithBlacklist(firePointObject.WorldPosition, fireDirection * config.Range, config.BulletSpeed, {service.UnWrap(firingHandle), service.UnWrap(self.Tool.Parent), service.UnWrap(Camera)}, service.UnWrap(bullet))
-			end
-		end
-
 		client.Remote.Commands.RegisterGun = function(args)
 			local Tool: Tool = args[1]
 			local config = configCaches[Tool.Name]
-			
+
 			if not config then
 				configCaches[Tool.Name] = getFullConfig(Tool.Name)
 				config = configCaches[Tool.Name]
 			end
+
+			local Remotes = Tool:WaitForChild("Remotes")
+			local MarkerEvent = create("BindableEvent", {Parent = Tool; Name = "MarkerEvent";})
+
+			local caster = require(script.FastCast).new()
+
+			local connections = {}
+			local ownerConnections = {}
+
+			local Owner, isOwnedByLocalPlayer = nil, nil
+
+			local function connectEvent(event: RBXScriptSignal, callback: (any)->()): RBXScriptConnection?
+				if not event or not callback then return end
+				local conn = event:Connect(callback)
+				local e:ClientGun = nil
+				if conn then
+					connections[conn] = true
+				end
+				return conn
+			end
+			local function connectOwnerEvent(...)
+				local connection = connectEvent(...)
+				ownerConnections[connection] = true
+				return connection
+			end
+
+			local function inflictTarget(hitPart: BasePart)
+				local damage = config.BaseDamage * if hitPart.Name == "Head" then config.HeadshotDamageMultiplier else 1
+				local hitPlr = Players:GetPlayerFromCharacter(hitPart.Parent)
+
+				if damageBillboardTemplate and damage ~= 0 and not config.NoDamageBillboards and (not hitPlr or Owner == hitPlr or not workspace:GetAttribute("TeamkillDisabled") or not hitPlr.Team or Owner.Team ~= hitPlr.Team) then
+					task.spawn(function()
+						local gui = damageBillboardTemplate:Clone()
+						gui.Amount.Text = if damage > 0 then "-"..damage else "+"..damage
+						gui.Amount.TextColor3 = if damage > 0 then DAMAGE_BILLBOARD_HARM_COLOR else DAMAGE_BILLBOARD_HEAL_COLOR
+						gui.Amount.TextSize = math.random(16, 20)
+
+						gui.Parent = Camera
+						gui.Adornee = hitPart
+
+						Debris:AddItem(gui, DAMAGE_BILLBOARD_DURATION)
+
+						TweenService:Create(gui, TweenInfo.new(DAMAGE_BILLBOARD_DURATION, Enum.EasingStyle.Sine), {StudsOffset = Vector3.new(math.random(1, 6), math.random(5, 8), math.random(1, 6))}):Play()
+						TweenService:Create(gui.Amount, TweenInfo.new(DAMAGE_BILLBOARD_DURATION, Enum.EasingStyle.Sine), {TextTransparency = 1, TextStrokeTransparency = 1}):Play()
+					end)
+				end
+
+				if isOwnedByLocalPlayer then
+					Remotes.InflictTarget:FireServer(hitPart)
+					MarkerEvent:Fire(hitPart.Name == "Head" and config.HeadshotDamageMultiplier > 1)
+				end
+			end
+
+			local function visualizeMuzzle(firingHandle: BasePart)
+				if config.MuzzleFlashEnabled then
+					task.spawn(function()
+						for _, v in pairs(firingHandle.GunMuzzle:GetChildren()) do
+							if v:GetAttribute("_IsMuzzleEffect") then
+								v:Emit(v:GetAttribute("EmitCount") or 1)
+							end
+						end
+					end)
+				end
+
+				if config.MuzzleLightEnabled then
+					Debris:AddItem(create("PointLight", {
+						Parent = firingHandle.GunMuzzle;
+						Brightness = config.MuzzleLightBrightness;
+						Color = config.MuzzleLightColor;
+						Enabled = true;
+						Range = config.MuzzleLightRange;
+						Shadows = config.MuzzleLightShadows;
+					}), config.MuzzleLightLifetime)
+				end
+			end
+
+			local function visualizeBulletSet(plr: Player, setData: {Vector3}, firingHandle: BasePart)
+				for _, fireDirection in pairs(setData) do
+					local firePointObject: Attachment = firingHandle.GunMuzzle
+
+					local bullet: Part = create("Part", {
+						Name = "Bullet";
+						Material = config.BulletMaterial;
+						Color = config.BulletColor;
+						CanCollide = false;
+						Anchored = true;
+						Size = config.BulletSize;
+						Transparency = config.BulletTransparency;
+						Shape = config.BulletShape;
+					})
+					if config.BulletMeshEnabled then
+						create("SpecialMesh", {
+							Parent = bullet;
+							Scale = config.BulletMeshScale;
+							MeshId = getAssetUri(config.BulletMeshId);
+							TextureId = getAssetUri(config.BulletTextureId);
+							MeshType = Enum.MeshType.FileMesh
+						})
+					end
+
+					edit(bullet, {
+						Parent = Camera;
+						CFrame = CFrame.new(firePointObject.WorldPosition, firePointObject.WorldPosition + fireDirection);
+					})
+
+					if config.WhizSoundEnabled and (#setData == 1 or math.random(0, 1) == 1) then
+						create("Sound", {
+							Parent = bullet;
+							Name = "WhizSound";
+							Looped = true;
+							RollOffMaxDistance = 50;
+							RollOffMinDistance = 10;
+							SoundId = chooseRandAssetId(config.WhizSoundIds);
+							Volume = config.WhizSoundVolume;
+							PlaybackSpeed = config.WhizSoundPitch;
+						}):Play()
+					end
+
+					if config.BulletLightEnabled then
+						create("PointLight", {
+							Parent = bullet;
+							Name = "BulletLight";
+							Brightness = config.BulletLightBrightness;
+							Color = config.BulletLightColor;
+							Enabled = true;
+							Range = config.BulletLightRange;
+							Shadows = config.BulletLightShadows;
+						})
+					end
+
+					if config.BulletTracerEnabled then
+						for _, v in pairs(config.Folder_TracerEffect:GetChildren()) do
+							if v:IsA("Trail") then
+								edit(v:Clone(), {
+									Parent = bullet;
+									Attachment0 = create("Attachment", {
+										Parent = bullet;
+										Name = "Attachment0";
+										Position = config.BulletTracerOffset0;
+									});
+									Attachment1 = create("Attachment", {
+										Parent = bullet;
+										Name = "Attachment1";
+										Position = config.BulletTracerOffset1;
+									});
+								})
+							end
+						end
+					end
+
+					if config.BulletParticleEnabled then
+						for _, v in pairs(config.Folder_ParticleEffect:GetChildren()) do
+							if v:IsA("ParticleEmitter") then
+								edit(v:Clone(), {
+									Parent = bullet;
+									Enabled = true;
+								})
+							end
+						end
+					end	
+
+					caster:FireWithBlacklist(firePointObject.WorldPosition, fireDirection * config.Range, config.BulletSpeed, {service.UnWrap(firingHandle), service.UnWrap(Tool.Parent), service.UnWrap(Camera)}, service.UnWrap(bullet))
+				end
+			end
 			
-			local self = {
-				Tool = Tool,
-				Remotes = Tool:WaitForChild("Remotes"),
-				MarkerEvent = create("BindableEvent", {Parent = Tool; Name = "MarkerEvent";}),
-				
-				config = config,
-				caster = require(script.FastCast).new(),
+			caster.Gravity = config.DropGravity
+			caster.ExtraForce = config.WindOffset
 
-				connections = {},
-				ownerConnections = {},
-			}
-			setmetatable(self, ClientGun)
-
-			self.caster.Gravity = config.DropGravity
-			self.caster.ExtraForce = config.WindOffset
-
-			self.caster.LengthChanged:Connect(function(_, segmentOrigin, segmentDirection, length, bullet)
+			caster.LengthChanged:Connect(function(_, segmentOrigin, segmentDirection, length, bullet)
 				bullet.CFrame = CFrame.new(segmentOrigin, segmentOrigin + segmentDirection) * CFrame.new(0, 0, -(length - bullet.Size.Z / 2))
 			end)
 
-			self.caster.RayHit:Connect(function(hitPart: BasePart, HitPoint: Vector3, Normal: Vector3, Material: Enum.Material, bullet: BasePart)
+			caster.RayHit:Connect(function(hitPart: BasePart, HitPoint: Vector3, Normal: Vector3, Material: Enum.Material, bullet: BasePart)
 				Debris:AddItem(bullet, 4)
 				edit(bullet, {
 					Transparency = 1;
@@ -450,7 +442,7 @@ return function()
 								end)
 							end
 						end)
-						self:inflictTarget(hitCore)
+						inflictTarget(hitCore)
 					else
 						--// Hit something non-alive
 						task.spawn(function()
@@ -473,7 +465,7 @@ return function()
 											local particle = v:Clone()
 											particle.Parent = attachment
 											if particle:GetAttribute("PartColor") then
-												particle.Color = ColorSequence.new(hitPart.Color, hitPart.Color)
+												particle.Color = ColorSequence.new(hitPart.Color)
 											end
 											task.delay(0.01, function()
 												particle:Emit(particle:GetAttribute("EmitCount") or 1)
@@ -580,6 +572,7 @@ return function()
 								end)
 							end
 						end)
+						
 						Debris:AddItem(attachment, 10)
 					end	
 
@@ -589,43 +582,44 @@ return function()
 							local hitHum = hit.Parent:FindFirstChildOfClass("Humanoid")
 							if hitHum and hitHum.Health > 0 and not alreadyHit[hitHum] then
 								alreadyHit[hitHum] = true
-								self:inflictTarget(hit)
+								inflictTarget(hit)
 							end
 						end
 					end)
 				end
 			end)
 
-			self:connectEvent(self.Remotes.VisualizeBulletSet.OnClientEvent, function(plr, ...)
+			connectEvent(Remotes.VisualizeBulletSet.OnClientEvent, function(plr, ...)
 				if plr ~= LocalPlayer then
-					self:visualizeBulletSet(plr, ...)
+					visualizeBulletSet(plr, ...)
 				end
 			end)
-			self:connectEvent(self.Remotes.VisualizeMuzzle.OnClientEvent, function(plr, ...)
+			connectEvent(Remotes.VisualizeMuzzle.OnClientEvent, function(plr, ...)
 				if plr ~= LocalPlayer and getDistanceFromCharacter(plr.Character.PrimaryPart.Position) <= config.MuzzleEffectMaxVisibleDistance then
-					self:visualizeMuzzle(...)
+					visualizeMuzzle(...)
 				end
 			end)
 
+			local Overlay = nil
 			local function updateOwnership()
-				self.Owner = self.Tool.Parent and (Players:GetPlayerFromCharacter(self.Tool.Parent) or self.Tool.Parent.Parent)
-				if not self.Tool.Parent or not self.Owner then
-					for conn in pairs(self.connections) do
+				Owner = Tool.Parent and (Players:GetPlayerFromCharacter(Tool.Parent) or Tool.Parent.Parent)
+				if not Tool.Parent or not Owner then
+					for conn in pairs(connections) do
 						conn:Disconnect()
 					end
-					self.connections = {}
-				elseif self.Owner ~= LocalPlayer and self.isOwnedByLocalPlayer then
-					self.isOwnedByLocalPlayer = false
-					for conn in pairs(self.ownerConnections) do
+					connections = {}
+				elseif Owner ~= LocalPlayer and isOwnedByLocalPlayer then
+					isOwnedByLocalPlayer = false
+					for conn in pairs(ownerConnections) do
 						conn:Disconnect()
 					end
-					if self.Overlay then
-						self.Overlay:Destroy()
-						self.Overlay = nil
+					if Overlay then
+						Overlay:Destroy()
+						Overlay = nil
 					end
-					self.ownerConnections = {}
-				elseif self.Owner == LocalPlayer and not self.isOwnedByLocalPlayer then
-					self.isOwnedByLocalPlayer = true
+					ownerConnections = {}
+				elseif Owner == LocalPlayer and not isOwnedByLocalPlayer then
+					isOwnedByLocalPlayer = true
 
 					local _initialSensitivity = UserInputService.MouseDeltaSensitivity
 					local _mag: number, _ammo: number = Tool:GetAttribute("CurrentMag"), Tool:GetAttribute("CurrentAmmo")
@@ -633,12 +627,11 @@ return function()
 
 					local AmmoGui, updateGui = nil, nil
 					local Reload, ToggleFlashlight = nil, nil
-					
-					local Overlay = edit(script.GunOverlay:Clone(), {
+
+					Overlay = edit(script.GunOverlay:Clone(), {
 						Name = client.Functions.GetRandom();
 						Enabled = true;
 					})
-					self.Overlay = Overlay
 					local CrosshairModule = require(Overlay.CrosshairModule)
 					local CameraModule = require(Overlay.CameraModule)(config, RunService)
 
@@ -649,7 +642,7 @@ return function()
 						end
 					end
 					local CurrentHandle = handles[1]
-					self:connectOwnerEvent(Tool.ChildAdded, function(c)
+					connectOwnerEvent(Tool.ChildAdded, function(c)
 						task.wait()
 						if c.Name == "Handle" or (c.Name:sub(1, 6) == "Handle" and tonumber(c.Name:sub(7, #c.Name))) then
 							table.insert(handles, c)
@@ -664,7 +657,7 @@ return function()
 						end
 					end)
 
-					self:connectOwnerEvent(self.Remotes.ChangeMagAndAmmo.OnClientEvent, function()
+					connectOwnerEvent(Remotes.ChangeMagAndAmmo.OnClientEvent, function()
 						_mag, _ammo = Tool:GetAttribute("CurrentMag"), Tool:GetAttribute("CurrentAmmo")
 						updateGui()
 					end)
@@ -772,7 +765,7 @@ return function()
 						end
 					end
 
-					self:connectOwnerEvent(self.MarkerEvent.Event, function(isHeadshot)
+					connectOwnerEvent(MarkerEvent.Event, function(isHeadshot)
 						if config.HitmarkerEnabled then
 							pcall(function()
 								TweenService:Create(
@@ -836,8 +829,8 @@ return function()
 							end
 							while equipped and not reloading and not holdDown  and (down or IsChargedShot) and _mag > 0 and LocalHumanoid.Health > 0 do
 								IsChargedShot = false
-								self:visualizeMuzzle(CurrentHandle)
-								self.Remotes.VisualizeMuzzle:FireServer(CurrentHandle)
+								visualizeMuzzle(CurrentHandle)
+								Remotes.VisualizeMuzzle:FireServer(CurrentHandle)
 								for _ = 1, if config.BurstFireEnabled then config.BulletPerBurst else 1 do
 									task.defer(function()
 										if config.CameraRecoilEnabled then
@@ -915,11 +908,11 @@ return function()
 											)
 											setData[i] = (select(2, workspace:FindPartOnRay(Ray.new(rayMag1.Origin, rayMag1.Direction * 5000), LocalCharacter)) - CurrentHandle.GunMuzzle.WorldPosition).Unit
 										end
-										self:visualizeBulletSet(LocalPlayer, setData, CurrentHandle)
-										self.Remotes.VisualizeBulletSet:FireServer(setData)
+										visualizeBulletSet(LocalPlayer, setData, CurrentHandle)
+										Remotes.VisualizeBulletSet:FireServer(setData)
 									end)
 									_mag -= 1
-									self.Remotes.ChangeMagAndAmmo:FireServer(_mag, _ammo)
+									Remotes.ChangeMagAndAmmo:FireServer(_mag, _ammo)
 									updateGui()
 									if config.BurstFireEnabled then
 										task.wait(config.BurstRate)
@@ -965,7 +958,7 @@ return function()
 							end
 							updateGui()
 							if config.ShotgunReload then
-								for i = 1, config.AmmoPerMag - _mag do
+								for _ = 1, config.AmmoPerMag - _mag do
 									playAnim("ShotgunClipin")
 									playSound("ShotgunClipin")
 									task.wait(config.ShellClipinTime)
@@ -981,12 +974,12 @@ return function()
 							else
 								_mag = config.AmmoPerMag
 							end
-							self.Remotes.ChangeMagAndAmmo:FireServer(_mag, _ammo, true)
+							Remotes.ChangeMagAndAmmo:FireServer(_mag, _ammo, true)
 							reloading = false
 							updateGui()
 						end
 					end
-					
+
 					local function stopAim()
 						TweenService:Create(Camera, TweenInfo.new(config.TweenLengthNAD, config.EasingStyleNAD, config.EasingDirectionNAD), {FieldOfView = 70}):Play()
 						CrosshairModule:setcrossscale(1)
@@ -997,7 +990,7 @@ return function()
 						aimDown = false
 					end
 
-					self:connectOwnerEvent(Overlay.MobileButtons.AimButton.MouseButton1Click, function()
+					connectOwnerEvent(Overlay.MobileButtons.AimButton.MouseButton1Click, function()
 						if not reloading and not holdDown  and not aimDown and equipped and config.IronsightEnabled and (LocalCharacter.Head.Position - Camera.CoordinateFrame.p).Magnitude <= 2 then
 							TweenService:Create(Camera, TweenInfo.new(config.TweenLength, config.EasingStyle, config.EasingDirection), {FieldOfView = config.IronsightFieldOfView}):Play()
 							CrosshairModule:setcrossscale(config.IronsightCrossScale)
@@ -1020,7 +1013,7 @@ return function()
 							UserInputService.MouseDeltaSensitivity = _initialSensitivity * config.SniperMouseSensitivity
 							aimDown = true
 							playAnim("Aiming")
-							
+
 							Debris:AddItem(zoomsound, 5)
 						else
 							stopAim()
@@ -1028,7 +1021,7 @@ return function()
 						end
 					end)
 
-					self:connectOwnerEvent(Overlay.MobileButtons.HoldDownButton.MouseButton1Click, function()
+					connectOwnerEvent(Overlay.MobileButtons.HoldDownButton.MouseButton1Click, function()
 						if not reloading and not holdDown  and config.HoldDownEnabled then
 							holdDown = true
 							stopAnim("Idle")
@@ -1043,21 +1036,21 @@ return function()
 						end
 					end)
 
-					self:connectOwnerEvent(Overlay.MobileButtons.ReloadButton.MouseButton1Click, Reload)
+					connectOwnerEvent(Overlay.MobileButtons.ReloadButton.MouseButton1Click, Reload)
 
-					self:connectOwnerEvent(Overlay.MobileButtons.FireButton.MouseButton1Down, function()
+					connectOwnerEvent(Overlay.MobileButtons.FireButton.MouseButton1Down, function()
 						Fire(Overlay.Crosshair.AbsolutePosition)
 					end)
-					self:connectOwnerEvent(Overlay.MobileButtons.FireButton.MouseButton1Up, function()
+					connectOwnerEvent(Overlay.MobileButtons.FireButton.MouseButton1Up, function()
 						down = false
 					end)
 
-					self:connectOwnerEvent(Mouse.Button1Down, function()
+					connectOwnerEvent(Mouse.Button1Down, function()
 						if not UserInputService.TouchEnabled then
 							Fire(Mouse)
 						end
 					end)
-					self:connectOwnerEvent(Mouse.Button1Up, function()
+					connectOwnerEvent(Mouse.Button1Up, function()
 						if not UserInputService.TouchEnabled then
 							down = false
 						end
@@ -1066,7 +1059,7 @@ return function()
 					local flashlightDebounce = false
 					function ToggleFlashlight()
 						flashlightDebounce = true
-						self.Remotes.Flashlight:FireServer()
+						Remotes.Flashlight:FireServer()
 						task.delay(0.5, function()
 							flashlightDebounce = false
 						end)
@@ -1074,7 +1067,7 @@ return function()
 
 					local toolEquippedConnections = {}
 
-					self:connectOwnerEvent(Tool.Equipped, function()
+					connectOwnerEvent(Tool.Equipped, function()
 						for _, v in pairs(toolEquippedConnections) do
 							if v then v:Disconnect() end
 						end
@@ -1096,9 +1089,9 @@ return function()
 						playAnim("Idle")
 
 						toolEquippedConnections = {
-							self:connectOwnerEvent(UserInputService.InputBegan, function(inputObj, processed)
+							connectOwnerEvent(UserInputService.InputBegan, function(inputObj, processed)
 								if processed or not equipped or inputObj.UserInputType ~= Enum.UserInputType.Keyboard then return end
-								
+
 								if inputObj.KeyCode == config.Key_Reload then
 									Reload()
 								elseif inputObj.KeyCode == config.Key_HoldDown then
@@ -1126,7 +1119,7 @@ return function()
 									end
 								end
 							end),
-							self:connectOwnerEvent(Mouse.Button2Down, function()
+							connectOwnerEvent(Mouse.Button2Down, function()
 								if reloading or holdDown  or aimDown or not equipped or (LocalCharacter.Head.Position - Camera.CoordinateFrame.p).Magnitude > 2 then return end
 								if config.IronsightEnabled then
 									TweenService:Create(Camera, TweenInfo.new(config.TweenLength, config.EasingStyle, config.EasingDirection), {FieldOfView = config.IronsightFieldOfView}):Play()
@@ -1153,7 +1146,7 @@ return function()
 									Debris:AddItem(zoomsound, zoomsound.TimeLength)
 								end
 							end),
-							self:connectOwnerEvent(Mouse.Button2Up, function()
+							connectOwnerEvent(Mouse.Button2Up, function()
 								if aimDown then
 									stopAim()
 									stopAnim("Aiming")
@@ -1162,7 +1155,7 @@ return function()
 						}
 					end)
 
-					self:connectOwnerEvent(Tool.Unequipped, function()
+					connectOwnerEvent(Tool.Unequipped, function()
 						holdDown , equipped = false, false
 						Overlay.Parent = script
 						if AmmoGui then
@@ -1190,7 +1183,7 @@ return function()
 						end
 					end)
 
-					self:connectOwnerEvent(LocalHumanoid.Died, function()
+					connectOwnerEvent(LocalHumanoid.Died, function()
 						LocalHumanoid:UnequipTools()
 						holdDown, equipped = false, false
 						Overlay.Parent = script
@@ -1238,8 +1231,8 @@ return function()
 			Tool.AncestryChanged:Connect(updateOwnership)
 			updateOwnership()
 
-			if self.config._Execute then
-				self.config._Execute(Tool, service, client)
+			if config._Execute then
+				config._Execute(Tool, service, client)
 			end
 		end
 
