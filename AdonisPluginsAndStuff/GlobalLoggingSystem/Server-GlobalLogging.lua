@@ -2,12 +2,12 @@
 	Description: Framework to empower surveillance.
 	Author: Expertcoderz
 	Release Date: 2022-01-28
+	Last Updated: 2022-03-11
 --]]
 
 server, service = nil, nil
 
-local DATASTORE_NAME = "NullLand/GlobalLogs"
-local DATASTORE_KEY = "Logs"
+local DATASTORE_KEY = "ExportedLogs"
 
 --// "exporting" = writing the current server's logs and info to the datastore
 local EXPORT_LOG_IN_STUDIO = false
@@ -34,34 +34,25 @@ local GLOBAL_LOGS_PERMS = {
 
 local LOGS_TO_INCLUDE = {
 	--// Names of log tables under server.Logs
-	"Chats", "Commands", "Exploit", "Script", --"Interaction"
+	"Chats", "Commands", "Exploit", "Interaction", "Economy", "RemoteFires"
 }
-
-local function FormatNumber(num: number): string
-	if not num then return "NaN" end
-	if num >= 1e150 then return "Inf" end
-	num = tostring(num):reverse()
-	local new = ""
-	local counter = 1
-	for i = 1, #num do
-		if counter > 3 then
-			new ..= ","
-			counter = 1
-		end
-		new ..= num:sub(i, i)
-		counter += 1
-	end
-	return new:reverse()
-end
+local INCLUDE_SERVER_OUTPUT_LOG = true
 
 return function()
 	xpcall(function()
 
-		local GlobalLogStore: DataStore = service.DataStoreService:GetDataStore(DATASTORE_NAME)
-		server.Variables.GlobalLogStore = GlobalLogStore
-
 		local _serverId = string.format("%x", os.time())
 		workspace:SetAttribute("_ServerId", _serverId)
+
+		local GlobalDataStore: DataStore = nil
+		if game.GameId == 1360694922 then
+			repeat
+				task.wait()
+				GlobalDataStore = server.Variables.NullLandDataStore
+			until GlobalDataStore
+		else
+			GlobalDataStore = service.DataStoreService:GetDataStore("GlobalLogs")
+		end
 
 		local _uniqueJoins: number, _firstJoin: string = {}, nil
 
@@ -75,11 +66,12 @@ return function()
 		server.Functions.ExportGlobalLog = function(manual: boolean?): boolean?
 			if EXPORT_LOG_IN_STUDIO or manual or not service.RunService:IsStudio() then
 				return xpcall(function()
-					GlobalLogStore:UpdateAsync(DATASTORE_KEY, function(currentLogs)
+					GlobalDataStore:UpdateAsync(DATASTORE_KEY, function(currentLogs)
 						if not currentLogs then
 							warn("Initial global logging datastore setup")
 							currentLogs = {}
 						end
+
 						local currentSize = #service.HttpService:JSONEncode(currentLogs)
 						if currentSize > CRITICAL_LOG_SIZE then
 							warn("GLOBAL EXPORTED LOG STORE CRITICALLY APPROACHING", DATASTORE_SIZE_LIMIT, "CHARACTER LIMIT:", currentSize)
@@ -92,6 +84,7 @@ return function()
 								table.remove(ids, ids[1])
 							until #service.HttpService:JSONEncode(currentLogs) <= CRITICAL_LOG_SIZE
 						end
+
 						local dataToExport = {
 							_JobId = if game.JobId then tostring(game.JobId) else "[Unknown JobId]";
 							_ServerType = if game.PrivateServerOwnerId ~= 0 then "Private"
@@ -101,7 +94,7 @@ return function()
 							_PrivateServerId = if game.PrivateServerId ~= "" then game.PrivateServerId else nil;
 							_PrivateServerOwnerId = if game.PrivateServerOwnerId ~= 0 then game.PrivateServerOwnerId else nil;
 							_StartTime = math.round(os.time() - time());
-							_ServerAge = math.round(time() / 60);
+							_ServerAge = string.format("%.2f", time() / 60);
 							_UniqueJoins = #_uniqueJoins;
 							_FirstJoin = _firstJoin or "N/A";
 							_ServerCountry = _serverCountry;
@@ -109,6 +102,17 @@ return function()
 						for _, logType in pairs(LOGS_TO_INCLUDE) do
 							dataToExport[logType] = server.Logs[logType]
 						end
+						if INCLUDE_SERVER_OUTPUT_LOG then
+							dataToExport.Server = {}
+							for i, log in ipairs(service.LogService:GetLogHistory()) do
+								dataToExport.Server[i] = {
+									Text = log.message,
+									Type = log.messageType.Name,
+									Time = log.timestamp
+								}
+							end
+						end
+
 						currentLogs[_serverId] = service.HttpService:JSONEncode(dataToExport)
 						return currentLogs
 					end)
@@ -139,7 +143,7 @@ return function()
 					server.Admin.CheckComLevel(server.Admin.GetLevel(plr), GLOBAL_LOGS_PERMS.ReceiveOverloadWarning)
 					and select(2, xpcall(function()
 						local chars = 0
-						for id: string, json: string in pairs(GlobalLogStore:GetAsync(DATASTORE_KEY) or {}) do
+						for id: string, json: string in pairs(GlobalDataStore:GetAsync(DATASTORE_KEY) or {}) do
 							chars += #json
 						end
 						return chars >= LOG_SIZE_BEFORE_WARN
@@ -179,7 +183,7 @@ return function()
 				server.Functions.Hint("Loading exported logs...", {plr})
 
 				local globalLogs = select(2, xpcall(function()
-					return GlobalLogStore:GetAsync(DATASTORE_KEY) or {}
+					return GlobalDataStore:GetAsync(DATASTORE_KEY) or {}
 				end, function(err)
 					warn("Error listing global exported logs:", err)
 					return nil
@@ -206,7 +210,11 @@ return function()
 						BackgroundTransparency = 1;
 						TextXAlignment = "Left";
 						Text = "  ["..(server.Remote.Get(plr, "LocallyFormattedTime", decoded._StartTime, true) or "Unknown").."] "..id;
-						ToolTip = string.format("#: %s | Type: %s | First Join: %s", FormatNumber(#json), tostring(decoded._ServerType), tostring(decoded._FirstJoin));
+						ToolTip = string.format("#: %s | Type: %s | First Join: %s",
+							service.FormatNumber(#json),
+							tostring(decoded._ServerType),
+							tostring(decoded._FirstJoin)
+						);
 						ZIndex = 2;
 						Children = {
 							{
@@ -247,7 +255,7 @@ return function()
 				local len = #service.HttpService:JSONEncode(globalLogs)
 				server.Remote.MakeGui(plr, "Window", {
 					Name = "ExportedLogs";
-					Title = "Exported Logs ("..num..") [#: "..FormatNumber(len).."]";
+					Title = "Exported Logs ("..num..") [#: "..service.FormatNumber(len).."]";
 					Icon = server.MatIcons.Description;
 					Size  = {330, 250};
 					MinSize = {300, 180};
@@ -272,7 +280,7 @@ return function()
 		server.Remote.Returnables.ExportedLog = function(plr: Player, args)
 			if server.Admin.CheckComLevel(server.Admin.GetLevel(plr), GLOBAL_LOGS_PERMS.Open) then
 				return select(2, xpcall(function()
-					local data = (GlobalLogStore:GetAsync(DATASTORE_KEY) or {})[args[1]]
+					local data = (GlobalDataStore:GetAsync(DATASTORE_KEY) or {})[args[1]]
 					return if data then service.HttpService:JSONDecode(data) else nil
 				end, function()
 					return false
@@ -291,7 +299,7 @@ return function()
 				assert(args[1], "Server ID not specified")
 				local success, res = pcall(function()
 					local existed = false
-					GlobalLogStore:UpdateAsync(DATASTORE_KEY, function(currentLogs)
+					GlobalDataStore:UpdateAsync(DATASTORE_KEY, function(currentLogs)
 						if currentLogs and currentLogs[args[1]] then
 							existed = true
 							currentLogs[args[1]] = nil
@@ -318,7 +326,7 @@ return function()
 				if server.Remote.GetGui(plr, "YesNoPrompt", {Question = "Would you like to delete all exported global logs?"}) == "Yes" then
 					if
 						pcall(function()
-							GlobalLogStore:RemoveAsync(DATASTORE_KEY)
+							GlobalDataStore:RemoveAsync(DATASTORE_KEY)
 						end)
 					then
 						server.Functions.Hint("Successfully cleared all global exported logs.", {plr})
