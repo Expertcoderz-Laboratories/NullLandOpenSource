@@ -9,7 +9,7 @@ server, service = nil, nil
 
 local DATASTORE_KEY = "ExportedLogs"
 
---// "exporting" = writing the current server's logs and info to the datastore
+--// "exporting" = writing of the current server's logs and information to the datastore
 local EXPORT_LOG_IN_STUDIO = false
 local EXPORT_LOG_INTERVAL = 70
 local EXPORT_LOG_ON_CLOSE = true
@@ -34,7 +34,7 @@ local GLOBAL_LOGS_PERMS = {
 
 local LOGS_TO_INCLUDE = {
 	--// Names of log tables under server.Logs
-	"Chats", "Commands", "Exploit", "Interaction", "Economy", "RemoteFires"
+	"Chats", "Commands", "Exploit", "RemoteFires", --"Interaction", "Economy"
 }
 local INCLUDE_SERVER_OUTPUT_LOG = true
 
