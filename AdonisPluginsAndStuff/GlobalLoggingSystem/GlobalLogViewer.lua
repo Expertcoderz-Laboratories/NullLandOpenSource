@@ -8,8 +8,8 @@ return function(data)
 		Name  = "GlobalLogViewer";
 		Title = "Global Log Viewer ("..serverId..")";
 		Icon = client.MatIcons.Description;
-		Size  = {390, 280};
-		MinSize = {300, 150};
+		Size  = {500, 280};
+		MinSize = {400, 150};
 		OnRefresh = function()
 			fetch()
 		end
@@ -53,7 +53,7 @@ return function(data)
 				{"PrivateServerOwnerId"; logs._PrivateServerOwnerId},
 				"",
 				{"Server Start Time"; service.FormatTime(logs._StartTime, true)},
-				{"Server Age"; tostring(logs._ServerAge).." min"},
+				{"Server Age"; logs._ServerAge.." min"},
 				{"# Unique Joins"; logs._UniqueJoins},
 				{"First Join"; logs._FirstJoin},
 				"",
@@ -92,11 +92,26 @@ return function(data)
 			if logName:sub(1, 1) == "_" then continue end
 
 			local quickRef = {}
-			for _, entry in ipairs(logEntries) do
-				table.insert(quickRef, {
-					Text = string.format("[%s] %s%s", service.FormatTime(entry.Time), tostring(entry.Text), logName == "Commands" and ": "..entry.Desc or "");
-					ToolTip = tostring(entry.Desc or entry.Text);
-				})
+			if logName == "Server" then
+				local MESSAGE_TYPE_COLORS = {
+					["MessageError"] = Color3.fromRGB(255, 55, 55),
+					["MessageWarning"] = Color3.fromRGB(255, 255, 80),
+					["MessageInfo"] = Color3.fromRGB(140, 255, 255)
+				}
+				for _, log: {Text: string, Type: string, Time: number} in ipairs(logEntries) do
+					table.insert(quickRef, {
+						Text = string.format("[%s] %s", service.FormatTime(log.Time), log.Text:gsub("\n", "\\n"));
+						ToolTip = log.Text;
+						Color = MESSAGE_TYPE_COLORS[log.Type];
+					})
+				end
+			else
+				for _, log: {Time: number, Text: string?, Desc: string?} in ipairs(logEntries) do
+					table.insert(quickRef, {
+						Text = string.format("[%s] %s%s", service.FormatTime(log.Time), tostring(log.Text), logName == "Commands" and ": "..log.Desc or "");
+						ToolTip = tostring(log.Desc or log.Text);
+					})
+				end
 			end
 
 			local tab = tabFrame:NewTab(logName, {Text = logName;})
@@ -134,16 +149,32 @@ return function(data)
 				scroller:ClearAllChildren()
 				for _, line in ipairs(quickRef) do
 					if string.find(line.Text:lower(), filter) or string.find(line.ToolTip:lower(), filter) then
-						scroller:Add("TextLabel", {
+						local entry = scroller:Add("TextButton", {
+							AutoButtonColor = false;
 							Size = UDim2.new(1, 0, 0, 22);
 							Position = UDim2.new(0, 0, 0, 22 * (i-1));
 							BackgroundTransparency = (i%2 == 0 and 0.2) or 0.6;
 							Text = "  "..line.Text;
 							ToolTip = line.ToolTip;
-							TextXAlignment = "Left";
-							TextTruncate = "AtEnd";
+							TextXAlignment = Enum.TextXAlignment.Left;
+							TextYAlignment = Enum.TextYAlignment.Top;
+							TextTruncate = Enum.TextTruncate.AtEnd;
+							TextWrapped = false;
 							ZIndex = 2;
+							ClipsDescendants = true;
 						})
+						if line.Color then
+							entry.TextColor3 = line.Color
+						end
+						entry.MouseButton1Click:Connect(function()
+							if not entry.Active then return end
+							entry.Active = false
+							client.UI.Make("Notepad", {
+								Text = line.Text..if line.ToolTip then "\n\n"..line.ToolTip else "";
+							})
+							task.wait(0.5)
+							entry.Active = true
+						end)
 						i += 1
 					end
 				end
