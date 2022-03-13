@@ -3,7 +3,7 @@
 	Description: The clientside component of the Adonis Gun System; handles most of the visuals & controls.
 	Author: Expertcoderz
 	Release Date: 2022-02-11 (project started in December 2021; originated from Aug/Sep 2021)
-	Last Updated: 2022-03-11
+	Last Updated: 2022-03-12
 --]]
 
 client, service = nil, nil
@@ -102,6 +102,17 @@ return function()
 				for _, v in pairs(LocalCharacter:GetChildren()) do
 					if string.match(v.Name, "Arm") and not string.match(v.Name, "Ragdoll") then
 						v.LocalTransparencyModifier = 0
+					elseif v:IsA("Accessory") and v.AccessoryType == Enum.AccessoryType.Jacket then
+						local handle = v:FindFirstChild("Handle")
+						local wrapLayer = handle and handle:FindFirstChildOfClass("WrapLayer")
+						if wrapLayer then
+							local head = LocalCharacter:FindFirstChild("Head")
+							if head and (head.Position - Camera.CoordinateFrame.p).Magnitude <= 2 then
+								wrapLayer.Enabled = false
+							else
+								wrapLayer.Enabled = true
+							end
+						end
 					end
 				end
 			end)
