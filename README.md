@@ -3,14 +3,17 @@ This repository contains an open-source copy of NullLand, the former development
 
 **⚠️ Anything here is released on an as-is basis. You may experiment with or use in your own projects, any scripts included within NullLand, but solely at your own discretion.**
 
-List of notable features included in NullLand (in the form of integrated Adonis plugins):
-- Various fun, trolling and utility commands (see following list)
+Note: Some audio or audio-dependent commands (eg. ``;ussr``) may not function as expected following Roblox's audio privacy update.
+
+## List of notable features included in NullLand (in the form of integrated Adonis plugins):
+- A variety fun, trolling and utility commands (see following list)
 - Loadable maps; toggleable environment
 - Economy system (currency; shop; leaderboard)
 - Gun system (highly configurable; with 79 weapons for demo in NullLand)
 - Death effects & tools dropping system (press Q to drop an equipped tool)
 - Chat integrations (chat tags & colors; Random Facts bot) & death messages
 - Global logging system (event logs per server are exported to datastores for later administrative access)
+- Interaction logs for logging player actions
 - Note on the couch (allows players to leave messages that save across servers)
 - Wearable vest armor
 - Anti-autoclicking
@@ -18,12 +21,15 @@ List of notable features included in NullLand (in the form of integrated Adonis 
 - Rankags system (see Additional Resources section)
 - Custom topbar and health GUI
 - Roblox services have their names scrambled
+- Command to load other admin systems such as HD Admin
+- Command to kick players with a customized kick dialog
+- VIP game pass (access to some commands + chat tag + energy sword loadout)
 - Button on the couch that has a 50% chance of giving a player a random weapon upon activation, and a 50% chance of demolishing said player
 - The Recursive Hallway
 - The Undiscovered Troll (easter egg)
 - More.
 
-List of NullLand-specific commands (taken from script; non-exhaustive):
+## List of NullLand-specific commands (taken from script; non-exhaustive):
 ```
 "<b>―――― Ranktag ―――――――――――――――――――――――――――――――</b>",
 "[Players] !ranktag/!rt <on/off/toggle> - Set whether your overhead ranktag is visible",
@@ -49,14 +55,9 @@ List of NullLand-specific commands (taken from script; non-exhaustive):
 "<b>―――― Miscellaneous ―――――――――――――――――――――――――――</b>",
 "[Players] !acm <on/off/toggle> - Set whether the Avatar Context Menu is enabled",
 "<i>To open the ACM, click on another player.</i>",
---"[Players] !pbcc - Teleports to the Pinewood Computer Core game",
 "[Players] ?adminpls - Gives you free temporary admin perms",
 "[Moderators] ;customkill/;ckill <player> <cause>",
-"[Admins] ;disguise <player> <username>",
-"[Admins] ;undisguise <player>",
-"[Admins] ;vanishedplayers/;vanishlist",
 "[Admins] ;facts <on/off/toggle> <message frequency (default: 30-90 seconds)>",
-"[HeadAdmins] ;vanish <player>",
 "[Creators] ;loadadminsystem <hd/kohls/bae/sa/commander/0xC0FF3BAD>",
 "[Creators] ;interactionlogs",
 "[Creators] ;customkick/;ckick <player> <title> <message>",
@@ -87,8 +88,6 @@ List of NullLand-specific commands (taken from script; non-exhaustive):
 "[Admins] ;airstrike <player> <missiles (default: 30)> <area size (default: 200 studs)>",
 "[HeadAdmins] ;missile/;nuclearstrike <player>",
 "[HeadAdmins] ;sysadmin <player>",
---"[HeadAdmins] ;gaslight <player>";
---"[HeadAdmins] ;reversegaslight <player>";
 "[Creators] ?ruin",
 "<b>―――― Map ――――――――――――――――――――――――――――――――</b>",
 "[Moderators] ;loadmap/;load <map name>",
