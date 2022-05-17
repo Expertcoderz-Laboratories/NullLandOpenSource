@@ -3,7 +3,7 @@ This repository contains an open-source copy of NullLand, the former development
 
 **⚠️ Anything here is released on an as-is basis. You may experiment with or use in your own projects, any scripts included within NullLand, but solely at your own discretion.**
 
-Note: Some audio or audio-dependent commands (eg. ``;ussr``) may not function as expected following Roblox's audio privacy update.
+Note: Some audio or audio-dependent commands (eg. ``;ussr``) may not function as intended following Roblox's audio privacy update.
 
 ## List of notable features included in NullLand (in the form of integrated Adonis plugins):
 - A variety fun, trolling and utility commands (see following list)
@@ -28,6 +28,7 @@ Note: Some audio or audio-dependent commands (eg. ``;ussr``) may not function as
 - The Recursive Hallway
 - The Undiscovered Troll (easter egg)
 - More.
+- Amogus.
 
 ## List of NullLand-specific commands (taken from script; non-exhaustive):
 ```
