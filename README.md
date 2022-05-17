@@ -1,7 +1,7 @@
-# NullLandOpenSource
-An open-source repository of scripts used in the ECL development sandbox game "NullLand", being worked on by Expertcoderz. Feel free to experiment with or even use these in your own projects! Credits aren't required, but they would be nice :)
+# [ARCHIVE] NullLandOpenSource
+This repository contains an open-source copy of NullLand, the former development sandbox place of Expertcoderz officially defunct since May 2022.
 
-**⚠️ Note that anything in this repository as well as within NullLand is constantly subject to change, and released on an as-is basis.**
+**⚠️ Anything here is released on an as-is basis. You may experiment with or use in your own projects, any scripts included within NullLand, but solely at your discretion.**
 
 ## Additional/Related Resources
 These are officially-supported for public use; any issues with the scripts are guaranteed to be fixed when reported.
